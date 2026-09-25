@@ -2,7 +2,8 @@
 
 Maquette de l'application de covoiturage étudiant de l'Université Gustave Eiffel (SAÉ BUT Informatique). 12 écrans et leurs popups, en version ordinateur et mobile, avec la charte graphique officielle de l'université.
 
-- **Charte graphique** : [`docs/charte-graphique-u-mobility.pdf`](docs/charte-graphique-u-mobility.pdf)
+- **Charte officielle de l'université (source du design)** : [`docs/Charte_Gustave_Eiffel_V2-4.pdf`](docs/Charte_Gustave_Eiffel_V2-4.pdf)
+- **Charte graphique du projet** : [`docs/charte-graphique-u-mobility.pdf`](docs/charte-graphique-u-mobility.pdf)
 - **Contexte complet** (pour Claude Code ou un nouveau développeur) : [`CLAUDE.md`](CLAUDE.md)
 - **Product Backlog** : [`docs/product-backlog-initial.xlsx`](docs/product-backlog-initial.xlsx)
 
@@ -43,4 +44,4 @@ Les popups et onglets s'ouvrent avec une ancre (ex. `trajet.html#demande`) : la 
 | `src/` | générateur (`build.py`), styles, interactions, logos, polices |
 | `dist/` | site généré (non versionné) |
 | `scripts/` | serveur de dev, génération de la charte PDF |
-| `docs/` | charte PDF, backlog, design system, couverture de la charte officielle |
+| `docs/` | charte officielle UGE V2.4 (PDF source), charte du projet, backlog, design system |

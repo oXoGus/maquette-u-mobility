@@ -1,10 +1,8 @@
-/* Polices auto-hébergées (SIL Open Font License, voir assets/fonts/OFL-*.txt) : pas d'appel à Google Fonts (RGPD). */
+/* Polices auto-hébergées (SIL Open Font License, voir assets/fonts/OFL-Figtree.txt) : pas d'appel à Google Fonts (RGPD).
+   La charte UGE V2.4 impose TT Norms® (licence payante) : Figtree la remplace tant que la licence n'est pas fournie. */
+@font-face { font-family: "Figtree"; font-style: normal; font-weight: 300; font-display: swap; src: url("assets/fonts/figtree-latin-300-normal.woff2") format("woff2"); }
 @font-face { font-family: "Figtree"; font-style: normal; font-weight: 400; font-display: swap; src: url("assets/fonts/figtree-latin-400-normal.woff2") format("woff2"); }
 @font-face { font-family: "Figtree"; font-style: normal; font-weight: 500; font-display: swap; src: url("assets/fonts/figtree-latin-500-normal.woff2") format("woff2"); }
 @font-face { font-family: "Figtree"; font-style: normal; font-weight: 600; font-display: swap; src: url("assets/fonts/figtree-latin-600-normal.woff2") format("woff2"); }
 @font-face { font-family: "Figtree"; font-style: normal; font-weight: 700; font-display: swap; src: url("assets/fonts/figtree-latin-700-normal.woff2") format("woff2"); }
-@font-face { font-family: "Outfit"; font-style: normal; font-weight: 300; font-display: swap; src: url("assets/fonts/outfit-latin-300-normal.woff2") format("woff2"); }
-@font-face { font-family: "Outfit"; font-style: normal; font-weight: 400; font-display: swap; src: url("assets/fonts/outfit-latin-400-normal.woff2") format("woff2"); }
-@font-face { font-family: "Outfit"; font-style: normal; font-weight: 500; font-display: swap; src: url("assets/fonts/outfit-latin-500-normal.woff2") format("woff2"); }
-@font-face { font-family: "Outfit"; font-style: normal; font-weight: 600; font-display: swap; src: url("assets/fonts/outfit-latin-600-normal.woff2") format("woff2"); }
-@font-face { font-family: "Outfit"; font-style: normal; font-weight: 700; font-display: swap; src: url("assets/fonts/outfit-latin-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "Figtree"; font-style: normal; font-weight: 800; font-display: swap; src: url("assets/fonts/figtree-latin-800-normal.woff2") format("woff2"); }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""U-Mobility v2 — génère le site statique (export Figma) et l'aperçu artifact (une page)."""
+"""U-Mobility v3 — génère le site statique (export Figma) et l'aperçu artifact (une page)."""
 import os, base64, random, datetime, shutil, html as H
 
 ROOT = os.path.dirname(os.path.abspath(__file__))                 # src/
@@ -49,6 +49,8 @@ P = {
     "leave": '<circle cx="10" cy="8" r="4"/><path d="M3 21c1.2-4 4-6 7-6 1.4 0 2.7.4 3.8 1.2"/><path d="M16 18h6"/>',
     "star": '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
     "tag": '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/>',
+    "wheel": '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M3.5 10.5h6M14.5 10.5h6M12 14.5V21"/>',
+    "seat": '<path d="M7 3h3.5l1.8 9H18a2 2 0 0 1 2 2v3H9.8z"/><path d="M9.8 17 8.5 21M17.5 17v4"/>',
     "hourglass": '<path d="M6 3h12M6 21h12M7 3c0 5 10 5 10 9s-10 4-10 9M17 3c0 5-10 5-10 9s10 4 10 9"/>',
 }
 ACT = ' class="active"'
@@ -56,7 +58,7 @@ STAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.7 5.6 6
 
 
 def i(name, cls=""):
-    return f'<svg class="i {cls}" viewBox="0 0 24 24" aria-hidden="true">{P[name]}</svg>'
+    return f'<svg class="i {cls}" data-i="{name}" viewBox="0 0 24 24" aria-hidden="true">{P[name]}</svg>'
 
 
 def stars(avg, n=None):
@@ -117,32 +119,71 @@ def textarea(id_, ph, maxlength=140, value=""):
             f'<span class="counter">{len(value)} / {maxlength}</span>')
 
 
+def hue(text):
+    """Petit hachage stable des tags (même calcul que tagColor() dans app.js)."""
+    n = 0
+    for c in text:
+        n = (n * 123 + ord(c)) % 1000003
+    return n
+
+
+def tagc(x):
+    """Couleur stable d'un tag (t0…t5), même calcul que tagColor() dans app.js."""
+    return f"t{hue(x.lower()) % 6}"
+
+
 def tagbox(id_, tags, ph="Ajouter un tag puis Entrée"):
-    t = "".join(f'<span class="tag"><span>{H.escape(x)}</span><button type="button" aria-label="Retirer {H.escape(x)}">{i("x","sm")}</button></span>' for x in tags)
+    t = "".join(f'<span class="tag {tagc(x)}"><span>{H.escape(x)}</span><button type="button" aria-label="Retirer {H.escape(x)}">{i("x","sm")}</button></span>' for x in tags)
     return f'<div class="tagbox">{t}<input id="{id_}" placeholder="{ph}" aria-label="Nouveau tag"></div>'
 
 
 def tags_static(tags):
-    return "".join(f'<span class="tag static">{H.escape(x)}</span>' for x in tags)
+    return "".join(f'<span class="tag static {tagc(x)}">{H.escape(x)}</span>' for x in tags)
 
 
 # ------------------------------------------------------------------ trip card
+COMMISSION = 0.19  # commission U-Mobility par passager et par trajet, incluse dans le prix affiché
+
+def euros(v):
+    return f"{v:.2f}".replace(".", ",") + " €"
+
+def driver_share(price):
+    """Part reversée au conducteur : prix payé par le passager moins la commission."""
+    return euros(float(price.replace(" €", "").replace(",", ".")) - COMMISSION)
+
+def role_tag(role):
+    """Rôle de l'utilisateur dans le trajet : volant turquoise = conducteur, siège magenta = passager."""
+    return (f'<span class="role-tag d">{i("wheel")}Conducteur</span>' if role == "d"
+            else f'<span class="role-tag p">{i("seat")}Passager</span>')
+
+PAX_POOL = ["IN", "TK", "CL", "AS", "HP", "YB"]
+
+def seats(free, total, pax=None):
+    """Passagers déjà acceptés (avatars) + places vides (cercles pointillés)."""
+    pax = list(pax) if pax is not None else PAX_POOL[:total - free]
+    av = "".join(f'<span class="avatar xs">{x}</span>' for x in pax) + '<span class="seat-free" aria-hidden="true"></span>' * free
+    return f'<span class="pax" aria-label="{len(pax)} passager{"s" if len(pax) > 1 else ""} sur {total}">{av}</span>'
+
 def trip(date, kind, dep_t, dep, arr_t, arr, price, free, total, pending, driver, rating, nr, tags=(),
-         href="trajet.html", status="", actions=None, go=True):
-    kind_b = f'<span class="badge">{i("repeat","sm")}Régulier · {kind}</span>' if kind != "Ponctuel" else '<span class="badge line">Ponctuel</span>'
+         href="trajet.html", status="", actions=None, go=True, role=None, pax=None):
+    kind_b = f'<span class="badge reg">{i("repeat","sm")}Régulier · {kind}</span>' if kind != "Ponctuel" else '<span class="badge line">Ponctuel</span>'
     pend = (f'<span class="badge wait">{i("hourglass","sm")}{pending} demande{"s" if pending > 1 else ""} en attente</span>' if pending
             else '<span class="badge line">Aucune demande en attente</span>')
-    top = f'<div class="trip-top"><span class="date">{date}</span>{kind_b}{status}</div>'
+    top = f'<div class="trip-top">{role_tag(role) if role else ""}<span class="date">{date}</span>{kind_b}{status}</div>'
     route = (f'<ol class="troute"><li><time>{dep_t}</time><span class="dot"></span><span class="place"><small>Départ</small><b>{H.escape(dep)}</b></span></li>'
              f'<li><time>{arr_t}</time><span class="dot"></span><span class="place"><small>Arrivée estimée</small><b>{H.escape(arr)}</b></span></li></ol>')
     side = (f'<div class="trip-side"><span class="pr"><span class="price">{price}</span> <small class="muted">/ passager</small></span>'
-            f'<span class="badge lav">{free} place{"s" if free > 1 else ""} libre{"s" if free > 1 else ""} sur {total}</span>'
+            f'<small class="fee">dont {euros(COMMISSION)} de commission</small>'
+            f'<span class="seatline">{seats(free, total, pax)}<span class="badge seats">{free} place{"s" if free > 1 else ""} restante{"s" if free > 1 else ""}</span></span>'
             f'<span class="driver-line">{"Conduit par" if driver != "Toi" else "Tu conduis"} {"<b>" + driver + "</b>" if driver != "Toi" else ""} {stars(rating, nr) if driver != "Toi" else ""}</span></div>')
-    foot = f'<div class="trip-foot">{pend}{tags_static(tags)}' + (f'<span class="go">Voir le détail{i("arrow","sm")}</span>' if go else "") + '</div>'
-    acts = f'<div class="trip-actions">{actions}</div>' if actions else ""
+    go_el = (f'<a class="go" href="{href}">Voir le détail{i("arrow","sm")}</a>' if actions else f'<span class="go">Voir le détail{i("arrow","sm")}</span>') if go else ""
+    # Avec des actions (Mes trajets), « Voir le détail » rejoint la ligne des boutons au lieu d'en ajouter une.
+    foot = f'<div class="trip-foot">{pend}{tags_static(tags)}{"" if actions else go_el}</div>'
+    acts = f'<div class="trip-actions">{go_el}{actions}</div>' if actions else ""
+    rc = f" role-{role}" if role else ""
     if actions:
-        return f'<article class="trip">{top}<div>{route}</div>{side}{foot}{acts}</article>'
-    return f'<a class="trip" href="{href}" aria-label="Voir le détail du trajet {H.escape(dep)} vers {H.escape(arr)}">{top}<div>{route}</div>{side}{foot}</a>'
+        return f'<article class="trip{rc}">{top}<div>{route}</div>{side}{foot}{acts}</article>'
+    return f'<a class="trip{rc}" href="{href}" aria-label="Voir le détail du trajet {H.escape(dep)} vers {H.escape(arr)}">{top}<div>{route}</div>{side}{foot}</a>'
 
 
 # ------------------------------------------------------------------ layout
@@ -281,16 +322,21 @@ def hbars(data, suffix=" %", scale=None):
 
 PAGES = {}  # key -> dict(title, app, modals, raw)
 
+# Logotype officiel Université Gustave Eiffel, version monochrome blanc (charte V2.4 p. 10-11 : fonds foncés).
+# Vectorisé depuis docs/Charte_Gustave_Eiffel_V2-4.pdf ; inséré en ligne pour que l'aperçu reste autonome.
+UGE_BLANC = open(os.path.join(ASSETS, "uge-logo-blanc.svg"), encoding="utf-8").read().replace("<svg ", '<svg class="uge" ', 1)
+
 # ================================================================== CONNEXION
 PAGES["connexion"] = dict(title="Connexion", raw=True, modals="", app=f'''<div class="auth">
 <section class="side">
-<div class="dots" aria-hidden="true">{"<i></i>" * 30}</div>
+<div class="pattern" aria-hidden="true"></div>
 <span class="arc a1" aria-hidden="true"></span><span class="arc a2" aria-hidden="true"></span>
 <div class="brandmark" style="padding-left:24px"><img src="assets/logo-blanc.png" alt=""><div><b>U-Mobility</b><span>Université Gustave Eiffel</span></div></div>
 <div style="display:grid;gap:16px;padding-left:24px">
-<h1>Covoiturage<br><b>étudiant</b></h1>
+<h1>Covoiturage<br>étudiant</h1>
 <p>Partage tes trajets vers le campus avec des étudiants et personnels de l'université. Moins de CO₂, plus de rencontres.</p>
 </div>
+<div style="padding-left:24px">{UGE_BLANC}</div>
 </section>
 <section class="form"><div>
 <h1>Connexion</h1>
@@ -308,76 +354,48 @@ PAGES["connexion"] = dict(title="Connexion", raw=True, modals="", app=f'''<div c
 </div>''')
 
 # ================================================================== TABLEAU DE BORD
-tot_p, best_p, heat_p = heatmap(7, 0)
-tot_c, best_c, heat_c = heatmap(21, 0)
-role_seg = ('<div class="seg" data-tabs="role" role="tablist" aria-label="Vue">'
-            f'<button type="button" data-tab="passager" class="on">{i("user","sm")}Passager</button>'
-            f'<button type="button" data-tab="conducteur">{i("car","sm")}Conducteur</button></div>')
-PAGES["index"] = dict(title="Tableau de bord", mtitle="U-Mobility", topright=role_seg, app=None, modals="", body=f'''
-<div class="hide-d">{role_seg}</div>
-<div data-panel-of="role" data-panel="passager" class="stack-lg">
+# Une seule vue : chaque utilisateur est à la fois passager et conducteur.
+tot_a, best_a, heat_a = heatmap(7, 0)
+PAGES["index"] = dict(title="Tableau de bord", mtitle="U-Mobility", app=None, modals="", body=f'''
 <section class="hero">
 <span class="arc a1" aria-hidden="true"></span><span class="arc a2" aria-hidden="true"></span>
-<h1>Bonjour Mathis,<br><b>où vas-tu aujourd'hui ?</b></h1>
-<p>Prochain trajet : demain, départ 7 h 50 de Noisy-le-Grand · Mont d'Est, arrivée 8 h 20 à Cité Descartes · Copernic.</p>
-<div class="cta"><a class="btn light" href="recherche.html">{i("search","sm")}Rechercher un trajet</a><a class="btn secondary" href="mes-trajets.html">Voir mes trajets</a></div>
+<h1>Bonjour Mathis, où vas-tu aujourd'hui ?</h1>
+<p>Prochain trajet : demain, départ 7 h 50 de Noisy-le-Grand · Mont d'Est, arrivée 8 h 20 à Cité Descartes · Copernic. 2 passagers attendent ta réponse pour ton trajet du vendredi.</p>
+<div class="cta"><a class="btn light" href="recherche.html">{i("search","sm")}Rechercher un trajet</a><a class="btn secondary" href="publier.html">{i("plus","sm")}Publier un trajet</a></div>
 </section>
 <div class="grid-4">
-<div class="stat dark"><span class="k">{i("ticket","sm")}Trajets en passager</span><span class="v">28</span><span class="d">+9 ce mois-ci</span></div>
-<div class="stat"><span class="k">{i("leaf","sm")}CO₂ évité</span><span class="v">54 <small>kg</small></span><span class="d m">≈ 270 km en voiture solo</span></div>
-<div class="stat"><span class="k">{i("route","sm")}Distance partagée</span><span class="v">336 <small>km</small></span><span class="d">+108 km ce mois-ci</span></div>
-<div class="stat"><span class="k">{i("star","sm")}Note reçue</span><span class="v">4,9 <small>/ 5</small></span><span class="d m">21 notes de conducteurs</span></div>
+<div class="stat dark"><span class="k">{i("route","sm")}Trajets effectués</span><span class="v">42</span><span class="d m">28 en passager · 14 en conducteur</span></div>
+<div class="stat"><span class="k">{i("leaf","sm")}CO₂ évité</span><span class="v">116 <small>kg</small></span><span class="d">+27 kg ce mois-ci</span></div>
+<div class="stat"><span class="k">{i("users","sm")}Personnes rencontrées</span><span class="v">19</span><span class="d m">conducteurs et passagers</span></div>
+<div class="stat"><span class="k">{i("star","sm")}Ma note</span><span class="v">4,8 <small>/ 5</small></span><span class="d m">48 notes reçues</span></div>
 </div>
 <section class="card">
-<div class="card-head"><div><h2>Mon activité</h2><p class="small muted">{tot_p} trajets en passager sur les 6 derniers mois · plus longue série : {best_p} jours</p></div><a class="more" href="historique.html">Historique{i("chevr","sm")}</a></div>
-{heat_p}
+<div class="card-head"><div><h2>Mon activité</h2><p class="small muted">{tot_a} trajets sur les 6 derniers mois, en passager et en conducteur · plus longue série : {best_a} jours</p></div><a class="more" href="historique.html">Historique{i("chevr","sm")}</a></div>
+{heat_a}
 </section>
 <div class="split">
 <section class="stack">
-<div class="card-head"><h2>Mes prochaines réservations</h2><a class="more" href="mes-trajets.html">Tout voir{i("chevr","sm")}</a></div>
-{trip("Demain · jeu. 25 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 1, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur", "Musique douce"), status='<span class="badge ok">' + i("check","sm") + 'Place confirmée</span>')}
-{trip("Ven. 26 sept.", "Ponctuel", "17 h 45", "Cité Descartes · Bienvenüe", "18 h 10", "Torcy · Centre", "3,00 €", 2, 3, 0, "Yanis B.", "4,7", 12, ("Bagages",), status='<span class="badge wait">' + i("clock","sm") + 'Demande envoyée</span>')}
+<div class="card-head"><h2>Mes prochains trajets</h2><a class="more" href="mes-trajets.html">Tout voir{i("chevr","sm")}</a></div>
+{trip("Demain · jeu. 25 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 1, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur", "Musique douce"), status='<span class="badge ok">' + i("check","sm") + 'Place confirmée</span>', role="p", pax=["MD", "IN"])}
+{trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Toi", "", None, ("Non-fumeur",), role="d", pax=["CL"])}
+{trip("Ven. 26 sept.", "Ponctuel", "17 h 45", "Cité Descartes · Bienvenüe", "18 h 10", "Torcy · Centre", "3,00 €", 2, 3, 0, "Yanis B.", "4,7", 12, ("Bagages",), status='<span class="badge wait">' + i("clock","sm") + 'Demande envoyée</span>', role="p", pax=["HP"])}
 </section>
-<aside class="card">
+<aside class="stack-lg">
+<section class="card">
+<div class="card-head"><h2>Demandes à traiter</h2><span class="badge">2</span></div>
+<div class="list">
+<a class="li" href="mes-trajets.html#recues"><span class="avatar sm">IN</span><div class="grow"><b>Inès N. · {stars("4,8")}</b><span>Pour ton trajet Noisy → Copernic · J V</span></div>{i("chevr","sm")}</a>
+<a class="li" href="mes-trajets.html#recues"><span class="avatar sm">TK</span><div class="grow"><b>Thomas K. · {stars("4,5")}</b><span>Pour ton trajet Noisy → Copernic · V</span></div>{i("chevr","sm")}</a>
+</div>
+</section>
+<section class="card">
 <h2>Demandes envoyées</h2>
 <div class="list">
 <a class="li" href="mes-trajets.html#envoyees"><span class="avatar sm">YB</span><div class="grow"><b>Trajet de Yanis B.</b><span>Ven. 26 sept. · départ 17 h 45 · Bienvenüe → Torcy</span></div><span class="badge wait">En attente</span></a>
 </div>
 <div class="notice">{i("leaf")}<span>Ta promo (BUT Info 2) a évité <b>1,2 t de CO₂</b> depuis la rentrée.</span></div>
+</section>
 </aside>
-</div>
-</div>
-<div data-panel-of="role" data-panel="conducteur" class="stack-lg" hidden>
-<section class="hero">
-<span class="arc a1" aria-hidden="true"></span><span class="arc a2" aria-hidden="true"></span>
-<h1>Bonjour Mathis,<br><b>2 passagers attendent ta réponse.</b></h1>
-<p>Ton trajet régulier Noisy-le-Grand → Copernic du vendredi a reçu 2 nouvelles demandes.</p>
-<div class="cta"><a class="btn light" href="mes-trajets.html#recues">Répondre aux demandes</a><a class="btn secondary" href="publier.html">{i("plus","sm")}Publier un trajet</a></div>
-</section>
-<div class="grid-4">
-<div class="stat dark"><span class="k">{i("car","sm")}Trajets conduits</span><span class="v">14</span><span class="d">+5 ce mois-ci</span></div>
-<div class="stat"><span class="k">{i("users","sm")}Passagers transportés</span><span class="v">31</span><span class="d m">2,2 en moyenne par trajet</span></div>
-<div class="stat"><span class="k">{i("leaf","sm")}CO₂ évité</span><span class="v">62 <small>kg</small></span><span class="d">+19 kg ce mois-ci</span></div>
-<div class="stat"><span class="k">{i("star","sm")}Note reçue</span><span class="v">4,8 <small>/ 5</small></span><span class="d m">27 notes de passagers</span></div>
-</div>
-<section class="card">
-<div class="card-head"><div><h2>Mon activité de conducteur</h2><p class="small muted">{tot_c} trajets conduits sur les 6 derniers mois · plus longue série : {best_c} jours</p></div><a class="more" href="historique.html">Historique{i("chevr","sm")}</a></div>
-{heat_c}
-</section>
-<div class="split">
-<section class="stack">
-<div class="card-head"><h2>Mes trajets publiés</h2><a class="more" href="mes-trajets.html">Gérer{i("chevr","sm")}</a></div>
-{trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Toi", "", None, ("Non-fumeur",))}
-{trip("Mer. 1er oct.", "Ponctuel", "18 h 00", "Cité Descartes · Copernic", "18 h 30", "Chelles · Gare", "2,00 €", 3, 3, 0, "Toi", "", None, ())}
-</section>
-<aside class="card">
-<div class="card-head"><h2>Demandes à traiter</h2><span class="badge">2</span></div>
-<div class="list">
-<a class="li" href="mes-trajets.html#recues"><span class="avatar sm">IN</span><div class="grow"><b>Inès N. · {stars("4,8")}</b><span>Pour : Noisy → Copernic · L J V</span></div>{i("chevr","sm")}</a>
-<a class="li" href="mes-trajets.html#recues"><span class="avatar sm b">TK</span><div class="grow"><b>Thomas K. · {stars("4,5")}</b><span>Pour : Noisy → Copernic · V</span></div>{i("chevr","sm")}</a>
-</div>
-</aside>
-</div>
 </div>
 ''')
 
@@ -427,7 +445,12 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <div class="split">
 <div class="stack-lg">
 <section class="card">
-<div class="between"><div class="row" style="gap:8px"><h2>Vendredi 26 septembre</h2><span class="badge">{i("repeat","sm")}Régulier · L M J V</span></div><span class="price" style="font-size:26px;line-height:30px">2,50 € <small>/ passager</small></span></div>
+<div class="between" style="align-items:flex-start"><div class="stack" style="gap:6px;justify-items:start"><span class="badge reg">{i("repeat","sm")}Trajet régulier</span><h2>Chaque lundi, mardi, jeudi et vendredi</h2></div><span class="price" style="font-size:26px;line-height:30px">2,50 € <small>/ passager</small></span></div>
+<div class="recur">
+<div class="stack" style="gap:6px"><span class="small muted">Jours</span>{days([0, 1, 3, 4], pick=False, mini=True)}</div>
+<div class="stack" style="gap:2px"><span class="small muted">Période</span><b>Du 26 sept. au 19 déc. 2026</b><span class="small muted">12 semaines, hors vacances universitaires</span></div>
+<div class="stack" style="gap:2px"><span class="small muted">Prochain départ</span><b>Ven. 26 sept. · 7 h 50</b></div>
+</div>
 <ol class="troute" style="gap:22px">
 <li><time>7 h 50</time><span class="dot"></span><span class="place"><small>Départ</small><b>Noisy-le-Grand · Mont d'Est</b><span class="small muted">Point de rendez-vous exact partagé dans la messagerie du trajet après acceptation</span></span></li>
 <li><time>8 h 20</time><span class="dot"></span><span class="place"><small>Arrivée estimée</small><b>Cité Descartes · Copernic</b><span class="small muted">Parking P2, entrée nord</span></span></li>
@@ -438,8 +461,9 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <span class="pin" style="left:62px;top:112px"><i></i>Mont d'Est</span>
 <span class="pin" style="right:24px;top:24px"><i style="background:var(--secondary)"></i>Copernic</span>
 </div>
-<div class="grid-4">
-<div class="stack" style="gap:2px"><span class="small muted">Places libres</span><b>2 sur 3</b></div>
+<div class="stack" style="gap:8px"><div class="between"><span class="label">Passagers</span><span class="badge seats">2 places restantes</span></div>
+<div class="row" style="gap:16px"><span class="row" style="gap:8px"><span class="avatar sm">IN</span><span><b>Inès N.</b> {stars("4,8")}</span></span><span class="row" style="gap:8px"><span class="seat-free lg" aria-hidden="true"></span><span class="muted">Place libre</span></span><span class="row" style="gap:8px"><span class="seat-free lg" aria-hidden="true"></span><span class="muted">Place libre</span></span></div></div>
+<div class="grid-3">
 <div class="stack" style="gap:2px"><span class="small muted">Demandes en attente</span><b>2</b></div>
 <div class="stack" style="gap:2px"><span class="small muted">Véhicule</span><b>Clio grise</b></div>
 <div class="stack" style="gap:2px"><span class="small muted">CO₂ évité / passager</span><b>1,4 kg</b></div>
@@ -449,13 +473,18 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <section class="card">
 <div class="card-head"><h2>Notes reçues par Léa</h2>{stars("4,9", "38 notes")}</div>
 <div class="dist">{dist_html}</div>
-<p class="small muted">Les notes sont données de 1 à 5 étoiles après chaque trajet, sans commentaire écrit.</p>
 </section>
 </div>
 <aside class="stack-lg">
 <section class="card">
 <div class="row"><span class="avatar lg b">LM</span><div><h2>Léa M.</h2><p class="muted">Master Génie civil · conductrice</p><p>{stars("4,9", 38)}</p></div></div>
 <div class="row" style="gap:6px"><span class="badge ok">{i("shield","sm")}Compte universitaire vérifié</span><span class="badge line">42 trajets conduits</span></div>
+<div class="recap">
+<div class="between small"><span class="muted">Participation reversée à Léa</span><b class="num">{driver_share("2,50 €")}</b></div>
+<div class="between small"><span class="muted">Commission U-Mobility</span><b class="num">{euros(COMMISSION)}</b></div>
+<div class="divider"></div>
+<div class="between"><b>Prix par trajet</b><b class="num">2,50 €</b></div>
+</div>
 <button class="btn secondary block" type="button" data-open="demande">{i("join","sm")}Demander à rejoindre ce trajet</button>
 <p class="small muted">Léa a 24 h pour accepter ou refuser. Tu rejoindras ensuite la messagerie du trajet.</p>
 </section>
@@ -468,7 +497,10 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <div class="field"><span class="label">Jours souhaités</span>{days([3, 4], allowed=[0, 1, 3, 4])}<span class="hint">Trajet régulier : choisis parmi les jours proposés par Léa (lundi, mardi, jeudi, vendredi).</span></div>
 <div class="field"><span class="label">Places</span><div class="stepper" data-max="2"><button class="iconbtn" type="button" aria-label="Moins">−</button><b>1</b><button class="iconbtn" type="button" aria-label="Plus">+</button></div></div>
 <div class="field"><label for="d-msg">Message à Léa <span class="muted" style="font-weight:400">(facultatif)</span></label>{textarea("d-msg", "Ex. : je peux être au point de rendez-vous 5 min avant.")}</div>
-<div class="recap"><div class="between small"><span class="muted">Période</span><b>du 26 sept. au 19 déc.</b></div><div class="between small"><span class="muted">Participation</span><b>2,50 € par trajet</b></div></div>
+<div class="recap"><div class="between small"><span class="muted">Période</span><b>du 26 sept. au 19 déc.</b></div>
+<div class="between small"><span class="muted">Participation reversée à Léa</span><b class="num">{driver_share("2,50 €")}</b></div>
+<div class="between small"><span class="muted">Commission U-Mobility</span><b class="num">{euros(COMMISSION)}</b></div>
+<div class="between small"><b>Prix par trajet</b><b class="num">2,50 €</b></div></div>
 <div class="dialog-foot"><button class="btn ghost" type="button" data-close>Annuler</button><button class="btn secondary" type="button" data-next data-loading>{i("send","sm")}Envoyer la demande</button></div>
 </div>
 <div data-step hidden>{success("Demande envoyée", "Léa a 24 h pour répondre. Tu seras notifié dès qu'elle accepte ou refuse.", '<a class="btn ghost" href="mes-trajets.html#envoyees">Voir mes demandes</a>')}</div>
@@ -503,7 +535,7 @@ PAGES["publier"] = dict(title="Publier un trajet", mtitle="Publier", sub="Seule 
 </div>
 <div class="grid-3">
 <div class="field"><span class="label">Places proposées</span><div class="stepper" data-max="4"><button class="iconbtn" type="button" aria-label="Moins">−</button><b>3</b><button class="iconbtn" type="button" aria-label="Plus">+</button></div></div>
-<div class="field"><label for="p-price">Participation par passager</label>{inp("p-price", "2,50 €")}<span class="hint">Suggestion : 2,40 € pour 12 km</span></div>
+<div class="field"><label for="p-price">Participation par passager</label>{inp("p-price", "2,50 €")}<span class="hint">Suggestion : 2,40 € pour 12 km. Tu reçois <b>{driver_share("2,50 €")}</b> par passager, U-Mobility garde une commission de {euros(COMMISSION)}.</span></div>
 <div class="field"><span class="label">Véhicule</span>{select("p-car", "Renault Clio · grise · 4 places", "car", [("Mes véhicules", ["Renault Clio · grise · 4 places"])])}<button class="linkbtn" type="button" data-open="voiture" style="font-size:13px">{i("plus","sm")}Ajouter une voiture</button></div>
 </div>
 <div class="field"><label for="p-tags">Tags <span class="muted" style="font-weight:400">(facultatif)</span></label>{tagbox("p-tags", ["Non-fumeur", "Musique douce"])}
@@ -529,8 +561,8 @@ def req(init, name, rating, dd, places, note, av=""):
             f'<button class="btn sm success" type="button" data-toast="{name} a rejoint le trajet" data-remove=".req">{i("check","sm")}Accepter</button></div></div>')
 
 
-def group_head(title, meta, extra="", href="trajet.html"):
-    return f'<header><span class="iconbtn" style="width:36px;height:36px">{i("car","sm")}</span><div class="grow"><b>{title}</b><span>{meta}</span></div>{extra}<a class="btn sm ghost" href="{href}">Voir le trajet</a></header>'
+def group_head(title, meta, extra="", href="trajet.html", role="d"):
+    return f'<header><span class="role-ico {role}" title="{"Conducteur" if role == "d" else "Passager"}">{i("wheel" if role == "d" else "seat")}</span><div class="grow"><b>{title}</b><span>{meta}</span></div>{extra}<a class="btn sm ghost" href="{href}">Voir le trajet</a></header>'
 
 
 mt_tabs = ('<div class="seg" data-tabs="mt" role="tablist">'
@@ -541,26 +573,26 @@ mt_tabs = ('<div class="seg" data-tabs="mt" role="tablist">'
 PAGES["mes-trajets"] = dict(title="Mes trajets", mtitle="Mes trajets", body=f'''
 {mt_tabs}
 <div data-panel-of="mt" data-panel="avenir" class="stack">
-{trip("Demain · jeu. 25 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 1, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur",), status='<span class="badge ok">' + i("check","sm") + 'Passager · place confirmée</span>', actions=f'<a class="btn sm ghost" href="messages.html">{i("msg","sm")}Messagerie du trajet</a><a class="btn sm ghost" href="trajet.html">Voir le détail</a><button class="btn sm danger" type="button" data-open="annuler">{i("x","sm")}Annuler ma place</button>')}
-{trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Toi", "", None, ("Non-fumeur", "Musique douce"), status='<span class="badge">' + i("car","sm") + 'Conducteur</span>', actions=f'<button class="btn sm" type="button" data-tab="recues">Voir les 2 demandes</button><a class="btn sm ghost" href="messages.html">{i("msg","sm")}Messagerie</a><a class="btn sm ghost" href="publier.html">{i("edit","sm")}Modifier</a><button class="btn sm danger" type="button" data-open="annuler-trajet">{i("x","sm")}Annuler le trajet</button>')}
-{trip("Mer. 1er oct.", "Ponctuel", "18 h 00", "Cité Descartes · Copernic", "18 h 30", "Chelles · Gare", "2,00 €", 3, 3, 0, "Toi", "", None, (), status='<span class="badge">' + i("car","sm") + 'Conducteur</span>', actions=f'<a class="btn sm ghost" href="publier.html">{i("edit","sm")}Modifier</a><button class="btn sm danger" type="button" data-open="annuler-trajet">{i("x","sm")}Annuler le trajet</button>')}
+{trip("Demain · jeu. 25 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 1, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur",), status='<span class="badge ok">' + i("check","sm") + 'Place confirmée</span>', role="p", pax=["MD", "IN"], actions=f'<button class="btn sm danger" type="button" data-open="annuler">{i("x","sm")}Annuler ma place</button>')}
+{trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Toi", "", None, ("Non-fumeur", "Musique douce"), role="d", pax=["CL"], actions=f'<button class="btn sm" type="button" data-tab="recues">Voir les 2 demandes</button><a class="btn sm ghost" href="publier.html">{i("edit","sm")}Modifier</a><button class="btn sm danger" type="button" data-open="annuler-trajet">{i("x","sm")}Annuler le trajet</button>')}
+{trip("Mer. 1er oct.", "Ponctuel", "18 h 00", "Cité Descartes · Copernic", "18 h 30", "Chelles · Gare", "2,00 €", 3, 3, 0, "Toi", "", None, (), role="d", actions=f'<a class="btn sm ghost" href="publier.html">{i("edit","sm")}Modifier</a><button class="btn sm danger" type="button" data-open="annuler-trajet">{i("x","sm")}Annuler le trajet</button>')}
 </div>
 <div data-panel-of="mt" data-panel="recues" class="stack" hidden>
-<div class="req-group">{group_head("Noisy-le-Grand · Mont d'Est → Cité Descartes · Copernic", "Régulier · L M J V · départ 7 h 50 · 2 places libres sur 3", '<span class="badge wait">2 en attente</span>')}
+<div class="req-group">{group_head("Noisy-le-Grand · Mont d'Est → Cité Descartes · Copernic", "Régulier · L M J V · départ 7 h 50 · 2 places restantes", '<span class="badge wait">2 en attente</span>')}
 {req("IN", "Inès N.", "4,8", [3, 4], "1 place", "Je peux être au Mont d'Est 5 min avant.")}
 {req("TK", "Thomas K.", "4,5", [4], "1 place", "", "b")}
 </div>
-<div class="req-group">{group_head("Cité Descartes · Copernic → Chelles · Gare", "Ponctuel · mer. 1er oct. · départ 18 h 00 · 3 places libres")}
+<div class="req-group">{group_head("Cité Descartes · Copernic → Chelles · Gare", "Ponctuel · mer. 1er oct. · départ 18 h 00 · 3 places restantes")}
 <div class="req"><span class="muted small">Aucune demande pour l'instant.</span></div></div>
 <div class="notice">{i("info")}<span>Sans réponse sous 24 h, une demande est automatiquement refusée.</span></div>
 </div>
 <div data-panel-of="mt" data-panel="envoyees" class="stack" hidden>
-<div class="req-group">{group_head("Cité Descartes · Bienvenüe → Torcy · Centre", "Trajet de Yanis B. · ponctuel · ven. 26 sept. · départ 17 h 45", '<span class="badge wait">En attente · 18 h restantes</span>')}
+<div class="req-group">{group_head("Cité Descartes · Bienvenüe → Torcy · Centre", "Trajet de Yanis B. · ponctuel · ven. 26 sept. · départ 17 h 45", '<span class="badge wait">En attente · 18 h restantes</span>', role="p")}
 <div class="req"><span class="avatar">MD</span><div class="grow"><b>Ta demande · 1 place</b><span class="small">« Je finis les cours à 17 h 30, parfait pour moi. »</span></div><div class="acts"><button class="btn sm danger" type="button" data-toast="Demande retirée" data-remove=".req-group">{i("x","sm")}Retirer ma demande</button></div></div>
 </div>
 </div>
 <div data-panel-of="mt" data-panel="anoter" class="stack" hidden>
-<div class="req-group">{group_head("Noisy-le-Grand · Mont d'Est → Cité Descartes · Copernic", "Terminé · jeu. 18 sept. · tu étais passager avec Léa M.")}
+<div class="req-group">{group_head("Noisy-le-Grand · Mont d'Est → Cité Descartes · Copernic", "Terminé · jeu. 18 sept. · tu étais passager avec Léa M.", role="p")}
 <div class="req"><span class="avatar b">LM</span><div class="grow"><b>Comment s'est passé ce trajet avec Léa ?</b><span class="small muted">Note de 1 à 5 étoiles, sans commentaire.</span></div><div class="acts"><button class="btn sm" type="button" data-open="noter-conducteur">{i("star","sm")}Noter Léa</button></div></div></div>
 <div class="req-group">{group_head("Cité Descartes · Copernic → Torcy · Centre", "Terminé · mer. 17 sept. · tu conduisais · 3 passagers")}
 <div class="req"><div class="avatars"><span class="avatar xs">IN</span><span class="avatar xs b">TK</span><span class="avatar xs">CL</span></div><div class="grow"><b>Note tes 3 passagers</b><span class="small muted">Inès N., Thomas K., Chloé L.</span></div><div class="acts"><button class="btn sm" type="button" data-open="noter-passagers">{i("star","sm")}Noter les passagers</button></div></div></div>
@@ -624,7 +656,7 @@ rows = ""
 for month, items in hist:
     rows += f'<tr class="month"><td colspan="7"><b>{month}</b></td></tr>'
     for d, t, r, role, who, km, co, received, given in items:
-        rb = f'<span class="badge">{i("car","sm")}Conducteur</span>' if role == "Conducteur" else f'<span class="badge line">{i("user","sm")}Passager</span>'
+        rb = f'<span class="badge drv">{i("car","sm")}Conducteur</span>' if role == "Conducteur" else f'<span class="badge line">{i("user","sm")}Passager</span>'
         av = '<span class="avatars">' + "".join(f'<span class="avatar xs{" b" if k % 2 else ""}">{x}</span>' for k, x in enumerate(who)) + '</span>'
         gv = stars5(given) if given else f'<button class="btn sm" type="button" data-open="noter-passagers">{i("star","sm")}Noter</button>'
         rc = stars5(received) if received else '<span class="small muted">En attente</span>'
@@ -648,10 +680,7 @@ PAGES["historique"] = dict(title="Historique", mtitle="Historique", back="index"
 <h2>Mes trajets fréquents</h2>
 <div class="stack">{hbars([("Noisy-le-Grand → Copernic", 24), ("Copernic → Torcy", 9), ("Noisy-Champs → Bienvenüe", 5), ("Lavoisier → Chelles", 4)], " trajets", 24)}</div>
 <div class="divider"></div>
-<div class="grid-2" style="gap:16px">
-<div class="stack" style="gap:4px"><span class="small muted">Note reçue comme conducteur</span>{stars("4,8", "27 notes")}</div>
-<div class="stack" style="gap:4px"><span class="small muted">Note reçue comme passager</span>{stars("4,9", "21 notes")}</div>
-</div>
+<div class="stack" style="gap:4px"><span class="small muted">Ma note, donnée par mes conducteurs et mes passagers</span>{stars("4,8", "48 notes")}</div>
 </section>
 </div>
 <section class="card">
@@ -828,10 +857,7 @@ PAGES["profil"] = dict(title="Profil", mtitle="Profil", body=f'''
 <section class="card" style="justify-items:center;text-align:center">
 <span class="avatar lg">MD</span>
 <div><h2>Mathis D.</h2><p class="muted">BUT Informatique · 2e année</p></div>
-<div class="grid-2" style="gap:12px;width:100%">
-<div class="stack" style="gap:2px"><span class="small muted">Conducteur</span>{stars("4,8", 27)}</div>
-<div class="stack" style="gap:2px"><span class="small muted">Passager</span>{stars("4,9", 21)}</div>
-</div>
+<div class="stack" style="gap:2px;justify-items:center"><span class="small muted">Ma note</span>{stars("4,8", "48 notes")}</div>
 <button class="btn ghost block" type="button" data-open="modifier-profil">{i("edit","sm")}Modifier le profil</button>
 <button class="btn danger block" type="button" data-logout>{i("logout","sm")}Se déconnecter</button>
 </section>
@@ -941,8 +967,7 @@ PAGES["direction"] = dict(title="Tableau de bord direction", role="dir", mtitle=
 PLAN = [
     ("Accès", [("connexion.html", "Connexion", "Comptes de démonstration par rôle")]),
     ("Étudiant", [
-        ("index.html", "Tableau de bord · passager", "Activité façon GitHub, réservations"),
-        ("index.html#conducteur", "Tableau de bord · conducteur", "Trajets publiés, demandes à traiter"),
+        ("index.html", "Tableau de bord", "Activité façon GitHub, prochains trajets, demandes"),
         ("recherche.html", "Rechercher un trajet", "Zones prédéfinies, tags, filtres"),
         ("trajet.html", "Détail du trajet", "Notes sans avis, demandes en attente"),
         ("trajet.html#demande", "Popup · demande de réservation", "Jours, places, message facultatif"),
@@ -974,7 +999,7 @@ plan_html = ""
 for g, items in PLAN:
     plan_html += f'<h2>{g}</h2><div class="plan">' + "".join(f'<a href="{h}"><b>{t}</b>{f"<span>{d}</span>" if d else ""}<code>{h}</code></a>' for h, t, d in items) + "</div>"
 PAGES["plan"] = dict(title="Plan de la maquette", raw=True, modals="", app=f'''<div class="content" style="margin:0 auto">
-<section class="hero"><span class="arc a1" aria-hidden="true"></span><h1>U-Mobility <b>· maquette v2</b></h1><p>Tous les écrans et popups, en version ordinateur et mobile. Chaque lien s'importe dans Figma avec html.to.design.</p></section>
+<section class="hero plan-hero"><span class="arc a1" aria-hidden="true"></span><span class="arc a2" aria-hidden="true"></span><h1>Maquette <span style="white-space:nowrap">U-Mobility</span> v3</h1><p>Tous les écrans et popups, en version ordinateur et mobile. Chaque lien s'importe dans Figma avec html.to.design.</p></section>
 {plan_html}
 </div>''')
 
@@ -1003,12 +1028,20 @@ LOADER = f'''<div class="loader" id="loader" role="status" aria-live="polite"><d
 <p>Chargement…</p></div></div>'''
 
 
+# Avatars : une couleur secondaire UGE stable par personne, calculée sur les initiales (classes av0…av6).
+import re, zlib
+AVATAR_RE = re.compile(r'class="avatar((?: xs| sm| lg)?)(?: b| l)? ?"([^>]*)>([A-ZÉ]{2})<')
+def color_avatars(h):
+    return AVATAR_RE.sub(lambda m: f'class="avatar{m.group(1)} av{zlib.crc32(("u-mobility" + m.group(3)).encode()) % 7}"{m.group(2)}>{m.group(3)}<', h)
+
 for k, p in PAGES.items():
     if not p.get("raw"):
         p["app"] = app_page(k, p["title"], p["body"], role=p.get("role", "user"), active=p.get("active"),
                             sub=p.get("sub", ""), mtitle=p.get("mtitle"), back=p.get("back"), topright=p.get("topright", ""))
+for p in PAGES.values():
+    p["app"], p["modals"] = color_avatars(p["app"]), color_avatars(p["modals"])
 
-FONTS = '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap">'
+FONTS = '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700;800&display=swap">'
 
 os.makedirs(EXPORT, exist_ok=True)
 shutil.copytree(ASSETS, os.path.join(EXPORT, "assets"), dirs_exist_ok=True)
@@ -1049,14 +1082,14 @@ opts = "".join(f'<option value="{k}">{PAGES[k]["title"]}</option>' for k in orde
 tpls = "".join(f'<template id="tpl-{k}">{PAGES[k]["app"]}</template><template id="tpl-{k}-m">{PAGES[k]["modals"]}</template>' for k in order)
 SHELL_CSS = '''
 body { background: var(--surface); }
-body.device-m { background: #dcdde9; }
-body.device-m .frame { max-width: 390px; margin: 24px auto 96px; min-height: 844px; border-radius: 28px; overflow: hidden; box-shadow: 0 0 0 10px #16193f, 0 30px 80px rgba(22,25,63,.35); }
+body.device-m { background: #dddee2; }
+body.device-m .frame { max-width: 390px; margin: 24px auto 96px; min-height: 844px; border-radius: 28px; overflow: hidden; box-shadow: 0 0 0 10px #0f273b, 0 30px 80px rgba(15,39,59,.35); }
 body.device-m .frame .app { min-height: 844px; }
-.shell-bar { position: fixed; right: 16px; bottom: 16px; z-index: 100; display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 999px; background: #16193f; color: #fff; box-shadow: 0 10px 30px rgba(22,25,63,.35); font: 500 13px/18px var(--font-sans); }
-.shell-bar select { background: #2a2e5c; color: #fff; border: 0; border-radius: 999px; padding: 8px 12px; font: 600 13px/18px var(--font-sans); max-width: 220px; }
-.shell-bar .dev { display: inline-flex; background: #2a2e5c; border-radius: 999px; padding: 3px; }
-.shell-bar .dev button { border: 0; background: transparent; color: #c9cbe0; padding: 6px 12px; border-radius: 999px; font: 600 12px/16px var(--font-sans); cursor: pointer; }
-.shell-bar .dev button.on { background: #fff; color: #16193f; }
+.shell-bar { position: fixed; right: 16px; bottom: 16px; z-index: 100; display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 999px; background: #0f273b; color: #fff; box-shadow: 0 10px 30px rgba(15,39,59,.35); font: 500 13px/18px var(--font-sans); }
+.shell-bar select { background: #24394c; color: #fff; border: 0; border-radius: 999px; padding: 8px 12px; font: 600 13px/18px var(--font-sans); max-width: 220px; }
+.shell-bar .dev { display: inline-flex; background: #24394c; border-radius: 999px; padding: 3px; }
+.shell-bar .dev button { border: 0; background: transparent; color: #c8d0d8; padding: 6px 12px; border-radius: 999px; font: 600 12px/16px var(--font-sans); cursor: pointer; }
+.shell-bar .dev button.on { background: #fff; color: #0f273b; }
 .shell-bar label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 @media (max-width: 700px) { .shell-bar { left: 8px; right: 8px; bottom: 8px; justify-content: space-between; } .shell-bar .dev { display: none; } .shell-bar select { max-width: none; flex: 1; } }
 '''

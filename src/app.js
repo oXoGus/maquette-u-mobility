@@ -179,10 +179,17 @@
     if (el.id === 'del-confirm') { var btn = document.getElementById('del-go'); if (btn) { var ok = el.value.trim().toUpperCase() === 'SUPPRIMER'; btn.disabled = !ok; btn.classList.toggle('is-disabled', !ok); } }
   });
 
+  // Même calcul que hue()/tagc() dans build.py : un tag garde sa couleur partout.
+  function tagColor(text) {
+    var n = 0, s = text.toLowerCase();
+    for (var k = 0; k < s.length; k++) n = (n * 123 + s.charCodeAt(k)) % 1000003;
+    return 't' + (n % 6);
+  }
+
   function addTag(box, text) {
     text = (text || '').trim().replace(/^#/, '');
     if (!box || !text) return;
-    var t = document.createElement('span'); t.className = 'tag';
+    var t = document.createElement('span'); t.className = 'tag ' + tagColor(text);
     t.innerHTML = '<span></span><button type="button" aria-label="Retirer"><svg class="i sm" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
     t.firstChild.textContent = text;
     box.insertBefore(t, box.querySelector('input'));
