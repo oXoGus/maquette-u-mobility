@@ -1,0 +1,19 @@
+# DÉVELOPPEMENT : docker compose -f docker-compose.dev.yml up --build
+# → http://localhost:8080 ; modifie src/, recharge la page (reconstruction automatique).
+name: u-mobility-dev
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "9999:80"
+    volumes:
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3

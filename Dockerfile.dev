@@ -1,0 +1,17 @@
+# Image de DÉVELOPPEMENT : nginx + Python.
+# scripts/dev.py --watch-only reconstruit dist/ à chaque modification de src/, nginx le sert sans cache.
+# (La prod est sur GitHub Pages : voir .github/workflows/deploy.yml.)
+FROM nginx:1.27-alpine
+
+RUN apk add --no-cache python3
+
+WORKDIR /app
+COPY nginx/nginx.dev.conf /etc/nginx/conf.d/default.conf
+
+
+# src/ et scripts/ sont montés en volume par docker-compose.dev.yml
+ENV SRC=/app/src OUT=/app/dist PYTHONUNBUFFERED=1
+RUN mkdir -p /app/dist
+
+EXPOSE 80
+CMD ["sh", "-c", "python3 /app/scripts/dev.py --watch-only & exec nginx -g 'daemon off;'"]
