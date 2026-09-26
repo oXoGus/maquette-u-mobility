@@ -31,6 +31,20 @@ def rgb(h):
     h = h.lstrip("#"); return " ".join(str(int(h[i:i + 2], 16)) for i in (0, 2, 4))
 
 
+_BUILD = open(os.path.join(SRC, "build.py"), encoding="utf-8").read()
+
+
+def ico(name):  # icône du dictionnaire P de build.py
+    path = re.search(r'"' + name + r"\": '(.*?)',\n", _BUILD).group(1)
+    return f'<svg class="i" viewBox="0 0 24 24" aria-hidden="true">{path}</svg>'
+
+
+def tg(label, icon, fam, chip=False, on=False):  # tag affiché ou puce de choix (mêmes classes que build.py)
+    if chip:
+        return f'<button class="tagchip f-{fam}{" on" if on else ""}"><span class="ic">{ico(icon)}</span><span class="ck">{ico("check")}</span>{label}</button>'
+    return f'<span class="tag f-{fam}">{ico(icon)}<span class="tl">{label}</span></span>'
+
+
 def fr(x, d=2):  # 5.96 → « 5,96 »
     return f"{x:.{d}f}".replace(".", ",")
 
@@ -253,15 +267,15 @@ STAR = '<svg viewBox="0 0 24 24"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 1
 pages.append(page(f'''<p class="eyebrow">06 · Composants</p><h2>Boutons, badges, champs</h2>
 <h3>Boutons</h3><div class="row" style="gap:10px"><span class="btn">Principal</span><span class="btn secondary">Demander à rejoindre</span><span class="btn ghost">Secondaire</span><span class="btn danger">Annuler ma place</span><span class="btn success">Accepter</span><span class="btn is-disabled">Désactivé</span></div>
 <p class="small">Pilules de 44 px de haut (36 px en petit), texte gras 14 px. Bleu : action principale ; violet : engagement (une fois par écran) ; contour : action secondaire ; rouge : se remplit au survol.</p>
-<h3 class="mt">Badges et tags</h3><div class="row" style="gap:8px"><span class="badge">Régulier · L M J V</span><span class="badge line">Ponctuel</span><span class="badge lav">2 places libres sur 3</span><span class="badge wait">2 demandes en attente</span><span class="badge ok">Place confirmée</span><span class="badge ko">Annulé</span><span class="tag static">Non-fumeur</span><span class="tag static">Musique douce</span></div>
+<h3 class="mt">Badges et tags</h3><div class="row" style="gap:8px"><span class="badge">Régulier · L M J V</span><span class="badge line">Ponctuel</span><span class="badge lav">2 places libres sur 3</span><span class="badge wait">2 demandes en attente</span><span class="badge ok">Place confirmée</span><span class="badge ko">Annulé</span>{tg("Non-fumeur", "nosmoke", "conf")}{tg("Musique", "music", "amb")}{tg("À l'heure", "clock", "hor")}</div>
 <h3 class="mt">Sélection</h3><div class="row" style="gap:10px"><span class="chip on">8 h – 9 h</span><span class="chip">9 h – 10 h</span><span class="seg"><button class="on">Passager</button><button>Conducteur</button></span><span class="toggle on"></span><span class="toggle"></span>
 <span class="days"><span class="on">L</span><span class="on">M</span><span>M</span><span class="on">J</span><span class="on">V</span><span class="off">S</span></span></div>
 <h3 class="mt">Notes</h3><div class="row" style="gap:24px"><span class="stars" style="font-size:15px">{STAR}4,9 <span class="n">(38)</span></span>
 <span class="rate">{"".join(f'<button class="on">{STAR}</button>' if k < 4 else f'<button>{STAR}</button>' for k in range(5))}</span></div>
 <p class="small">Note de 1 à 5 étoiles bleues après chaque trajet, sans commentaire écrit : le passager note le conducteur, le conducteur note chaque passager.</p>
 <h3 class="mt">Champs</h3><div class="cols2"><div class="field"><span class="label">Départ</span><div class="select"><button>Noisy-le-Grand · Mont d'Est</button></div><span class="hint">Zones de rendez-vous prédéfinies : jamais d'adresse.</span></div>
-<div class="field"><span class="label">Tags (facultatif)</span><div class="tagbox"><span class="tag">Non-fumeur</span><span class="tag">Calme</span><span class="ph">Ajouter un tag…</span></div></div></div>
-<p class="small">Champs à angles droits adoucis (4 px), filet gris qui se renforce au survol et devient bleu au focus.</p>''', n=10, title="Composants"))
+<div class="field"><div class="tp-head"><span class="label">Tags (facultatif)</span><span class="tp-count"><b>2</b> / 5</span></div><div class="tp-row">{tg("Calme", "moon", "amb", True, True)}{tg("Discussion", "msg", "amb", True)}{tg("Non-fumeur", "nosmoke", "conf", True, True)}{tg("Bagages", "bag", "conf", True)}</div></div></div>
+<p class="small">Champs à angles droits adoucis (4 px), filet gris qui se renforce au survol et devient bleu au focus. Tags : catalogue fixe de 16 tags en 4 familles (ambiance violet, confort turquoise, horaires bleu, profil et accessibilité magenta) ; un tap coche (fond pâle, coche à la place de l'icône), un tap décoche ; 5 au plus sur un trajet.</p>''', n=10, title="Composants"))
 
 pages.append(page(f'''<p class="eyebrow">06 · Composants</p><h2>La carte de trajet</h2>
 <p class="lead">Brique centrale des listes. Posée à plat sur le gris de page avec un filet ; toute la carte est cliquable : au survol, le filet devient bleu et le bouton « Voir le détail » s'anime.</p>
@@ -273,7 +287,7 @@ pages.append(page(f'''<p class="eyebrow">06 · Composants</p><h2>La carte de tra
 <li><b>Conducteur</b> : nom et note moyenne avec le nombre de notes, sans photo dans la carte.</li>
 <li><b>Pied de carte</b> : nombre de demandes en attente, tags du trajet, bouton « Voir le détail ».</li>
 </ol>
-<div class="box mt"><h3>Ce que la carte ne montre pas</h3><p>Pas d'avatar du conducteur, pas de pourcentage de compatibilité, pas d'adresse. Les tags facultatifs remplacent la compatibilité : ils sont comparés aux tags écrits par le passager dans ses préférences.</p></div>''', n=11, title="Carte de trajet"))
+<div class="box mt"><h3>Ce que la carte ne montre pas</h3><p>Pas d'avatar du conducteur, pas de pourcentage de compatibilité, pas d'adresse. Les tags facultatifs remplacent la compatibilité : ils sont comparés aux préférences cochées par le passager dans son profil.</p></div>''', n=11, title="Carte de trajet"))
 
 pages.append(page(f'''<p class="eyebrow">07 · Motifs</p><h2>Le principe graphique et la route</h2>
 <div class="cols2"><div><h3>Principe graphique de l'université</h3><div class="arcs-demo"><span class="pat"></span><span class="carc d1"></span><span class="carc d2"></span><b>On part ensemble ?</b></div>
@@ -416,7 +430,6 @@ td.spec {{ color: {INK}; }}
 .sh small {{ font-weight: 400; color: {MUTED}; }}
 /* composants (réutilise styles.css) */
 .select > button {{ width: 100%; min-height: 40px; border: 1px solid {LINE}; border-radius: 4px; background: #fff; text-align: left; padding: 0 12px; }}
-.tagbox .ph {{ color: {MUTED}; font-size: 12px; }}
 .anat {{ background: {SURF}; border-radius: 8px; padding: 12px; }}
 .legend {{ margin: 6px 0 0; padding-left: 18px; display: grid; gap: 5px; font-size: 11px; }}
 .arcs-demo {{ height: 160px; background: {BRAND}; border-radius: 8px; position: relative; overflow: hidden; }}
