@@ -293,6 +293,62 @@
     var x = f && f.querySelector('.tp-clear'); if (x) x.hidden = !n;
   }
 
+  /* ---------- Statistiques : les nombres montent de 0 à leur valeur (courbe de Bézier cubique) ---------- */
+  // Même syntaxe que cubic-bezier() en CSS : x(t) est résolu par Newton puis dichotomie, on renvoie y(t).
+  function cubicBezier(x1, y1, x2, y2) {
+    var cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+    var cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+    function sx(t) { return ((ax * t + bx) * t + cx) * t; }
+    function sy(t) { return ((ay * t + by) * t + cy) * t; }
+    function dx(t) { return (3 * ax * t + 2 * bx) * t + cx; }
+    return function (x) {
+      if (x <= 0) return 0; if (x >= 1) return 1;
+      var t = x, i, d;
+      for (i = 0; i < 8; i++) { var e = sx(t) - x; if (Math.abs(e) < 1e-6) return sy(t); d = dx(t); if (Math.abs(d) < 1e-6) break; t -= e / d; }
+      var lo = 0, hi = 1; t = x;
+      while (hi - lo > 1e-6) { if (sx(t) < x) lo = t; else hi = t; t = (lo + hi) / 2; }
+      return sy(t);
+    };
+  }
+  var COUNT_EASE = cubicBezier(0.22, 1, 0.36, 1), COUNT_MS = 1200;
+  function fmtFr(n, dec) { // format français : espace fine insécable pour les milliers, virgule décimale
+    var p = n.toFixed(dec).split('.');
+    return p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + (p[1] ? ',' + p[1] : '');
+  }
+  function countUp(el) { // affiche 0 et renvoie la fonction qui lance la montée
+    var node = el.firstChild;
+    if (!node || node.nodeType !== 3) return;
+    var m = node.nodeValue.match(/^(\s*)([\d\s  ]*\d(?:,\d+)?)(.*)$/);
+    if (!m) return;
+    var to = parseFloat(m[2].replace(/[\s  ]/g, '').replace(',', '.')), dec = (m[2].split(',')[1] || '').length;
+    var sep = /[\s  ]/.test(m[2]) ? m[2].match(/[\s  ]/)[0] : ' ';
+    var fmt = function (v) { return m[1] + fmtFr(v, dec).replace(/ /g, sep) + m[3]; };
+    node.nodeValue = fmt(0);
+    return function () {
+      var t0 = null;
+      requestAnimationFrame(function step(now) {
+        if (t0 === null) t0 = now;
+        var k = Math.min(1, (now - t0) / COUNT_MS);
+        node.nodeValue = k < 1 ? fmt(to * COUNT_EASE(k)) : m[1] + m[2] + m[3]; // valeur finale : texte d'origine
+        if (k < 1) requestAnimationFrame(step);
+      });
+    };
+  }
+  function initCounters() {
+    var els = $$('.stat .v').filter(function (el) { return !el.hasAttribute('data-counted'); });
+    els.forEach(function (el) { el.setAttribute('data-counted', ''); });
+    // Pas d'animation pour l'import Figma (valeurs finales) ni si l'utilisateur réduit les animations
+    if (document.documentElement.classList.contains('figma') || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+    var io = 'IntersectionObserver' in window && new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) { io.unobserve(e.target); e.target._count(); } });
+    }, { threshold: 0.4 });
+    els.forEach(function (el) {
+      var go = countUp(el);
+      if (!go) return;
+      if (io) { el._count = go; io.observe(el); } else go(); // démarre quand la carte est visible
+    });
+  }
+
   /* ---------- SPA router (artifact) ---------- */
   function navigate(href, noLoader) {
     var parts = href.split('#'), page = parts[0].replace('.html', ''), state = parts[1] || '';
@@ -311,6 +367,7 @@
   function init() {
     $$('.rate').forEach(function (r) { setRate(r, parseInt(r.getAttribute('data-value') || '0', 10)); });
     initRole();
+    initCounters();
   }
 
   if (SPA) {
