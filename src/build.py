@@ -33,6 +33,8 @@ P = {
     "arrow": '<path d="M5 12h14M13 6l6 6-6 6"/>',
     "back": '<path d="M19 12H5M11 6l-6 6 6 6"/>',
     "chev": '<path d="M6 9l6 6 6-6"/>',
+    "up": '<path d="M12 19V5M6 11l6-6 6 6"/>',
+    "down": '<path d="M12 5v14M6 13l6 6 6-6"/>',
     "chevr": '<path d="M9 6l6 6-6 6"/>',
     "repeat": '<path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12"/><path d="M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/>',
     "eyeoff": '<path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-3 3.8M6.1 6.1C3.9 7.6 2.5 12 2.5 12S6 19 12 19a9 9 0 0 0 4-.9"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
@@ -231,15 +233,6 @@ def tp_head(label, sel, max_=None, clear=False):
 
 
 # ------------------------------------------------------------------ trip card
-COMMISSION = 0.19  # commission U-Mobility par passager et par trajet, incluse dans le prix affiché (voiture seulement)
-
-def euros(v):
-    return f"{v:.2f}".replace(".", ",") + " €"
-
-def driver_share(price):
-    """Part reversée au conducteur : prix payé par le passager moins la commission."""
-    return euros(float(price.replace(" €", "").replace(",", ".")) - COMMISSION)
-
 # Modes de déplacement : une couleur secondaire UGE par mode (classes .m-car, .m-bike…).
 # Seule la voiture a un prix et des places limitées ; les autres modes affichent le nombre de personnes qui ont rejoint.
 MODES = {
@@ -261,6 +254,17 @@ def role_tag(role, mode="car"):
     return (f'<span class="role-tag d">{i("route")}Organisateur</span>' if role == "d"
             else f'<span class="role-tag p">{i("join")}Participant</span>')
 
+# Arrêts des trajets de démo Noisy-le-Grand → Copernic (celui de Léa, celui que conduit l'utilisateur).
+LEA_STOPS = [("8 h 05", "Noisy-Champs · Gare RER A")]
+PUB_STOPS = [("8 h 02", "Noisy-Champs · Gare RER A")]  # arrêt prérempli dans Publier (et son aperçu)
+MY_STOPS = [("8 h 02", "Noisy-Champs · Gare RER A"), ("8 h 10", "Champs-sur-Marne · Nesles")]
+STOP_MAX = 2  # arrêts intermédiaires au plus sur un trajet, dans l'ordre du parcours
+
+def stop_lis(stops, extra=None):
+    """Arrêts intermédiaires [(heure estimée, zone), …] entre le départ et l'arrivée d'une .troute (extra : texte sous la zone)."""
+    return "".join(f'<li class="stop"><time>{t}</time><span class="dot"></span><span class="place"><small>Arrêt {k} · heure estimée</small><b>{H.escape(z)}</b>'
+                   f'{extra[k - 1] if extra else ""}</span></li>' for k, (t, z) in enumerate(stops, 1))
+
 PAX_POOL = ["IN", "TK", "CL", "AS", "HP", "YB"]
 
 def seats(free, total, pax=None):
@@ -277,7 +281,7 @@ def joined(pax):
             f'<span class="badge joined">{i("users","sm")}{n} personne{"s" if n > 1 else ""} {"ont" if n > 1 else "a"} rejoint</span>')
 
 def trip(date, kind, dep_t, dep, arr_t, arr, price, free, total, pending, driver, rating, nr, tags=(),
-         href="trajet.html", status="", actions=None, go=True, role=None, pax=None, mode="car", cancel="", sent=False):
+         href="trajet.html", status="", actions=None, go=True, role=None, pax=None, mode="car", cancel="", sent=False, stops=()):
     car = mode == "car"
     me = driver == "Toi"
     tags = [x for x in tags if mode in TAGS[x][2]]  # un tag hors de son mode n'a pas de sens (ex. Non-fumeur à vélo)
@@ -296,10 +300,10 @@ def trip(date, kind, dep_t, dep, arr_t, arr, price, free, total, pending, driver
         pend = '<span class="badge line">Aucune demande en attente</span>'
     top = f'<div class="trip-top">{mode_tag(mode)}{role_tag(role, mode) if role else ""}<span class="date">{date}</span>{kind_b}{status}</div>'
     route = (f'<ol class="troute"><li><time>{dep_t}</time><span class="dot"></span><span class="place"><small>Départ</small><b>{H.escape(dep)}</b></span></li>'
+             + stop_lis(stops) +
              f'<li><time>{arr_t}</time><span class="dot"></span><span class="place"><small>Arrivée estimée</small><b>{H.escape(arr)}</b></span></li></ol>')
     if car:
-        money = (f'<span class="pr"><span class="price">{price}</span> <small class="muted">/ passager</small></span>'
-                 + (f'<small class="fee">tu reçois {driver_share(price)} / passager</small>' if me else f'<small class="fee">dont {euros(COMMISSION)} de commission</small>'))
+        money = f'<span class="pr"><span class="price">{price}</span> <small class="muted">/ passager</small></span>'
         places = f'<span class="seatline">{seats(free, total, pax)}<span class="badge seats">{free} place{"s" if free > 1 else ""} restante{"s" if free > 1 else ""}</span></span>'
         who = "Tu conduis" if me else f'Conduit par <b>{driver}</b> {stars(rating, nr)}'
     else:
@@ -429,7 +433,7 @@ def success(title, text, extra=""):
 
 
 # ------------------------------------------------------------------ heatmap data
-def heatmap(seed, total_hint, weeks=26, role_word="trajets"):
+def heatmap(seed, total_hint, weeks=26, role_word="trajets", cls=""):
     rnd = random.Random(seed)
     end = datetime.date(2026, 9, 27)  # dimanche
     start = end - datetime.timedelta(days=weeks * 7 - 1)  # lundi
@@ -463,7 +467,7 @@ def heatmap(seed, total_hint, weeks=26, role_word="trajets"):
             cells.append(f'<i data-l="{lvl}" data-tip="{label}"></i>')
     lbl = "".join(f"<span>{x}</span>" for x in ["Lun", "", "Mer", "", "Ven", "", ""])
     legend = ('<div class="heat-legend">Moins' + "".join(f'<i style="background:var(--heat-{k})"></i>' for k in range(5)) + 'Plus</div>')
-    return total, best, f'''<div class="heat-wrap"><div class="heat" role="img" aria-label="Activité des 6 derniers mois : {total} trajets">
+    return total, best, f'''<div class="heat-wrap"><div class="heat{" " + cls if cls else ""}" role="img" aria-label="Activité des {weeks // 4 if weeks < 26 else 6} derniers mois : {total} trajets">
 <span></span><div class="months">{"".join(months)}</div>
 <div class="days-lbl">{lbl}</div><div class="cells">{"".join(cells)}</div>
 </div></div>{legend}'''
@@ -494,9 +498,8 @@ PAGES = {}  # key -> dict(title, app, modals, raw)
 # Vectorisé depuis docs/Charte_Gustave_Eiffel_V2-4.pdf ; inséré en ligne pour que l'aperçu reste autonome.
 UGE_BLANC = open(os.path.join(ASSETS, "uge-logo-blanc.svg"), encoding="utf-8").read().replace("<svg ", '<svg class="uge" ', 1)
 
-# ================================================================== CONNEXION
-PAGES["connexion"] = dict(title="Connexion", raw=True, modals="", app=f'''<div class="auth">
-<section class="side">
+# Panneau bleu des écrans hors application (connexion, compte suspendu).
+AUTH_SIDE = f'''<section class="side">
 <div class="pattern" aria-hidden="true"></div>
 <span class="arc a1" aria-hidden="true"></span><span class="arc a2" aria-hidden="true"></span>
 <div class="brandmark" style="padding-left:24px"><img src="assets/logo-blanc.png" alt=""><div><b>U-Mobility</b><span>Université Gustave Eiffel</span></div></div>
@@ -506,7 +509,11 @@ PAGES["connexion"] = dict(title="Connexion", raw=True, modals="", app=f'''<div c
 </div>
 <div style="padding-left:24px">{UGE_BLANC}</div>
 </section>
-<section class="form"><div>
+'''
+
+# ================================================================== CONNEXION
+PAGES["connexion"] = dict(title="Connexion", raw=True, modals="", app=f'''<div class="auth">
+{AUTH_SIDE}<section class="form"><div>
 <h1>Connexion</h1>
 <p class="muted">Utilise ton compte universitaire ou un compte de démonstration.</p>
 <div class="field"><label for="login-mail">Adresse e-mail universitaire</label>{inp("login-mail", "", "prenom.nom@edu.univ-eiffel.fr", "user", "email")}</div>
@@ -517,35 +524,81 @@ PAGES["connexion"] = dict(title="Connexion", raw=True, modals="", app=f'''<div c
 <a href="index.html" data-set-role="user"><span class="avatar sm">MD</span><div class="grow"><b>Étudiant · passager et conducteur</b><small>mathis.demo@u-mobility.fr</small></div>{i("arrow","sm")}</a>
 <a href="moderation.html" data-set-role="mod"><span class="avatar sm">KB</span><div class="grow"><b>Modérateur · signalements</b><small>moderation.demo@u-mobility.fr</small></div>{i("arrow","sm")}</a>
 <a href="back-office.html" data-set-role="admin"><span class="avatar sm">CV</span><div class="grow"><b>Administrateur · back office et modération</b><small>admin.demo@u-mobility.fr</small></div>{i("arrow","sm")}</a>
+<a href="suspendu.html" data-set-role="user"><span class="avatar sm">MD</span><div class="grow"><b>Étudiant · compte suspendu</b><small>suspendu.demo@u-mobility.fr</small></div>{i("arrow","sm")}</a>
 </div>
+<p class="small muted" style="text-align:center">{i("shield","sm")} <a href="donnees.html" data-set-role="user">Comment sont gérées tes données</a></p>
 </div></section>
 </div>''')
 
+# ================================================================== COMPTE SUSPENDU
+# Écran affiché à la connexion tant qu'une suspension décidée en modération (moderation.html#signalement) court.
+# Durée n en jours : SUSP_DAYS ; SUSP_LEFT jours restants à la date de la démo (27 sept.).
+SUSP_DAYS, SUSP_LEFT = 7, 5
+susp_rules = "".join(f'<div class="li"><span class="sr-ico {c}">{i(ic, "sm")}</span><div class="grow"><b>{t}</b><span>{d}</span></div></div>' for c, ic, t, d in [
+    ("ko", "x", "Publier, rechercher ou rejoindre un trajet", "Toutes les fonctions de covoiturage sont bloquées."),
+    ("ko", "msg", "Messagerie en lecture seule", "Tu ne peux plus écrire aux membres de tes trajets."),
+    ("warn", "calendar", "Tes 2 trajets à venir sont annulés", "Les passagers et conducteurs concernés ont été prévenus."),
+    ("ok", "shield", "Tes données restent accessibles", "Tu peux les télécharger ou contester la décision."),
+])
+PAGES["suspendu"] = dict(title="Compte suspendu", raw=True, app=f'''<div class="auth">
+{AUTH_SIDE}<section class="form"><div class="susp">
+<span class="badge ko">{i("lock","sm")}Compte suspendu</span>
+<h1>Ton compte est suspendu {SUSP_DAYS} jours</h1>
+<p class="muted">Suite à un signalement, l'équipe de modération a suspendu ton compte. Tu pourras de nouveau covoiturer à partir du <b>jeudi 2 octobre à 8 h 40</b>.</p>
+<div class="susp-count" role="group" aria-label="Durée de la suspension">
+<div class="between"><span class="v">{SUSP_LEFT} <small>jours restants</small></span>{i("hourglass")}</div>
+<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="{SUSP_DAYS}" aria-valuenow="{SUSP_DAYS - SUSP_LEFT}" aria-label="Jours écoulés"><i style="width:{(SUSP_DAYS - SUSP_LEFT) / SUSP_DAYS * 100:.0f}%"></i></div>
+<div class="between small muted"><span>Depuis le 25 sept. · 8 h 40</span><span>Jusqu'au 2 oct. · 8 h 40</span></div>
+</div>
+<div class="recap">
+<div class="between small"><span class="muted">Motif</span><b>Absence au rendez-vous (2e fois)</b></div>
+<div class="between small"><span class="muted">Trajet concerné</span><b>Noisy → Copernic · 23 sept.</b></div>
+<div class="between small"><span class="muted">Référence</span><b>Signalement #247</b></div>
+</div>
+<div class="field"><span class="label">Pendant la suspension</span><div class="list">{susp_rules}</div></div>
+<div class="notice warn">{i("info")}<span>Une nouvelle suspension peut entraîner la fermeture définitive de ton compte.</span></div>
+<div class="stack" style="gap:8px">
+<button class="btn block" type="button" data-open="contester">{i("flag","sm")}Contester la décision</button>
+<button class="btn ghost block" type="button" data-loadtoast="Export prêt · lien envoyé sur ton e-mail universitaire">{i("download","sm")}Télécharger mes données</button>
+<button class="btn quiet block" type="button" data-logout>{i("logout","sm")}Se déconnecter</button>
+</div>
+</div></section>
+</div>''', modals=modal("contester", f'''
+<div data-step>
+{dhead("Contester la suspension", "Un autre membre de l'équipe de modération réexamine le dossier #247.", "flag")}
+<div class="field"><span class="label">Pourquoi contestes-tu ?</span><div class="row" style="gap:6px">{"".join(f'<button class="chip{" on" if k == 0 else ""}" data-radio type="button">{m}</button>' for k, m in enumerate(["J'étais au rendez-vous", "J'avais prévenu", "Erreur de compte", "Autre"]))}</div></div>
+<div class="field"><label for="ct-msg">Explique ce qui s'est passé</label>{textarea("ct-msg", "Horaire, messages envoyés, imprévu…", 500)}</div>
+<div class="notice">{i("info")}<span>La suspension reste active pendant l'examen. Tu reçois la réponse par e-mail sous 72 h.</span></div>
+<div class="dialog-foot"><button class="btn ghost" type="button" data-close>Annuler</button><button class="btn" type="button" data-next data-loading>{i("send","sm")}Envoyer la contestation</button></div>
+</div>
+<div data-step hidden>{success("Contestation envoyée", "Ton dossier est réexaminé. Tu recevras la réponse sur ton e-mail universitaire sous 72 h.")}</div>
+'''))
+
 # ================================================================== TABLEAU DE BORD
 # Une seule vue : chaque utilisateur est à la fois passager et conducteur.
-tot_a, best_a, heat_a = heatmap(7, 0)
+# Les trajets à venir passent en premier : bandeau compact, activité résumée dans la colonne de droite (3 mois).
+tot_a, best_a, heat_a = heatmap(7, 0, weeks=13, cls="compact")
+def mini_stat(ic, k, v, d=""):
+    sub = f'<span class="d m">{d}</span>' if d else ""
+    return f'<div class="stat mini"><span class="k">{i(ic, "sm")}{k}</span><span class="v">{v}</span>{sub}</div>'
+dash_stats = "".join(mini_stat(*x) for x in [
+    ("route", "Trajets effectués", "42", "28 passager · 14 conducteur"),
+    ("leaf", "CO₂ évité", "116 <small>kg</small>", ""),
+    ("users", "Personnes rencontrées", "19", ""),
+    ("star", "Ma note", "4,8 <small>/ 5</small>", "48 notes"),
+])
 PAGES["index"] = dict(title="Tableau de bord", mtitle="U-Mobility", app=None, modals="", body=f'''
-<section class="hero">
+<section class="hero compact">
 <span class="arc a1" aria-hidden="true"></span><span class="arc a2" aria-hidden="true"></span>
-<h1>Bonjour Mathis, où vas-tu aujourd'hui ?</h1>
-<p>Prochain trajet : demain, départ 7 h 50 de Noisy-le-Grand · Mont d'Est, arrivée 8 h 20 à Cité Descartes · Copernic. 2 passagers attendent ta réponse pour ton trajet du vendredi.</p>
-<div class="cta"><a class="btn light" href="recherche.html">{i("search","sm")}Rechercher un trajet</a><a class="btn secondary" href="publier.html">{i("plus","sm")}Publier un trajet</a></div>
-</section>
-<div class="grid-4">
-<div class="stat dark"><span class="k">{i("route","sm")}Trajets effectués</span><span class="v">42</span><span class="d m">28 en passager · 14 en conducteur</span></div>
-<div class="stat"><span class="k">{i("leaf","sm")}CO₂ évité</span><span class="v">116 <small>kg</small></span><span class="d">+27 kg ce mois-ci</span></div>
-<div class="stat"><span class="k">{i("users","sm")}Personnes rencontrées</span><span class="v">19</span><span class="d m">conducteurs et passagers</span></div>
-<div class="stat"><span class="k">{i("star","sm")}Ma note</span><span class="v">4,8 <small>/ 5</small></span><span class="d m">48 notes reçues</span></div>
-</div>
-<section class="card">
-<div class="card-head"><div><h2>Mon activité</h2><p class="small muted">{tot_a} trajets sur les 6 derniers mois, en passager et en conducteur · plus longue série : {best_a} jours</p></div><a class="more" href="historique.html">Historique{i("chevr","sm")}</a></div>
-{heat_a}
+<div class="stack" style="gap:6px"><h1>Bonjour Mathis, où vas-tu aujourd'hui ?</h1>
+<p>Prochain trajet demain à 7 h 50, de Noisy-le-Grand · Mont d'Est à Copernic. 2 passagers attendent ta réponse pour vendredi.</p></div>
+<div class="cta"><a class="btn light" href="recherche.html">{i("search","sm")}Rechercher</a><a class="btn secondary" href="publier.html">{i("plus","sm")}<span>Publier<span class="hide-m"> un trajet</span></span></a></div>
 </section>
 <div class="split">
 <section class="stack">
 <div class="card-head"><h2>Mes prochains trajets</h2><a class="more" href="mes-trajets.html">Tout voir{i("chevr","sm")}</a></div>
-{trip("Demain · jeu. 25 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 1, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur", "Musique"), status='<span class="badge ok">' + i("check","sm") + 'Place confirmée</span>', role="p", pax=["MD", "IN"], href="trajet.html#membre")}
-{trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Toi", "", None, ("Non-fumeur",), role="d", pax=["CL"])}
+{trip("Demain · jeu. 25 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 1, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur", "Musique"), status='<span class="badge ok">' + i("check","sm") + 'Place confirmée</span>', role="p", pax=["MD", "IN"], href="trajet.html#membre", stops=LEA_STOPS)}
+{trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Toi", "", None, ("Non-fumeur",), role="d", pax=["CL"], stops=MY_STOPS)}
 {trip("Ven. 26 sept.", "Ponctuel", "17 h 45", "Cité Descartes · Bienvenüe", "18 h 10", "Torcy · Centre", "3,00 €", 2, 3, 0, "Yanis B.", "4,7", 12, ("Bagages",), status='<span class="badge wait">' + i("clock","sm") + 'Demande envoyée</span>', role="p", pax=["HP"], sent=True)}
 {trip("Lun. 29 sept.", "L J", "17 h 30", "Cité Descartes · Copernic", "17 h 50", "Noisy-Champs · Gare RER A", "", 0, 0, 0, "Amina S.", "5,0", 22, ("Calme",), role="p", pax=["AS", "MD", "PR", "CL", "HP"], mode="bike", href="trajet.html#velo")}
 </section>
@@ -556,6 +609,12 @@ PAGES["index"] = dict(title="Tableau de bord", mtitle="U-Mobility", app=None, mo
 <a class="li" href="historique.html#noter-conducteur"><span class="avatar sm">LM</span><div class="grow"><b>Noter Léa M.</b><span>Jeu. 18 sept. · tu étais passager</span></div>{i("chevr","sm")}</a>
 <a class="li" href="historique.html#noter-passagers"><span class="avatars"><span class="avatar xs">IN</span><span class="avatar xs">TK</span><span class="avatar xs">CL</span></span><div class="grow"><b>Noter tes 3 passagers</b><span>Mer. 17 sept. · tu conduisais</span></div>{i("chevr","sm")}</a>
 </div>
+</section>
+<section class="card">
+<div class="card-head"><h2>Mon activité</h2><a class="more" href="historique.html">Historique{i("chevr","sm")}</a></div>
+<div class="mini-stats">{dash_stats}</div>
+{heat_a}
+<p class="small muted">{tot_a} trajets sur les 3 derniers mois · plus longue série : {best_a} jours</p>
 </section>
 <section class="card">
 <div class="card-head"><h2>Mes modes ce mois-ci</h2><a class="more" href="profil.html">Modifier{i("chevr","sm")}</a></div>
@@ -598,7 +657,7 @@ PAGES["recherche"] = dict(title="Rechercher un trajet", mtitle="Rechercher", mod
 <section class="stack">
 <div class="between"><p><b>6 trajets</b> <span class="muted">· triés par heure d'arrivée</span></p>
 <div class="select" id="s-sort" style="min-width:200px"><button type="button">{i("filter","sm")}<span>Heure d'arrivée</span>{i("chev","sm chev")}</button><div class="options"><button type="button" class="opt sel">Heure d'arrivée</button><button type="button" class="opt">Prix</button><button type="button" class="opt">Note du conducteur</button><button type="button" class="opt">Places libres</button></div></div></div>
-{trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur", "Musique"))}
+{trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur", "Musique"), stops=LEA_STOPS)}
 {trip("Ven. 26 sept.", "Ponctuel", "8 h 00", "Noisy-Champs · Gare RER A", "8 h 15", "Cité Descartes · Bienvenüe", "1,50 €", 3, 4, 0, "Hugo P.", "4,6", 9, ("Discussion",))}
 {trip("Ven. 26 sept.", "L M V", "7 h 55", "Noisy-le-Grand · Mont d'Est", "8 h 25", "Cité Descartes · Lavoisier", "2,50 €", 1, 3, 1, "Amina S.", "5,0", 22, ("Calme", "Non-fumeur", "Bagages", "À l'heure"))}
 {trip("Ven. 26 sept.", "Ponctuel", "8 h 10", "Champs-sur-Marne · Nesles", "8 h 25", "Cité Descartes · Copernic", "1,00 €", 2, 2, 0, "Paul R.", "4,8", 15, ("Bagages",))}
@@ -626,6 +685,7 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 </div>
 <ol class="troute" style="gap:22px">
 <li><time>7 h 50</time><span class="dot"></span><span class="place"><small>Départ</small><b>Noisy-le-Grand · Mont d'Est</b><span class="small muted">Point de rendez-vous exact partagé dans la messagerie du trajet après acceptation</span></span></li>
+{stop_lis(LEA_STOPS, ['<span class="small muted">Tu peux aussi monter ici : choisis ton point de montée dans ta demande</span>'])}
 <li><time>8 h 20</time><span class="dot"></span><span class="place"><small>Arrivée estimée</small><b>Cité Descartes · Copernic</b><span class="small muted">Parking P2, entrée nord</span></span></li>
 </ol>
 <div class="map" aria-label="Carte des zones de rendez-vous (fictive)">
@@ -645,7 +705,7 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 </section>
 <section class="card" data-view="membre" hidden>
 <div class="between" style="align-items:flex-start"><div class="stack" style="gap:6px;justify-items:start"><div class="row" style="gap:6px">{role_tag("p")}{mode_tag("car")}<span class="badge ok">{i("check","sm")}Place confirmée</span><span class="badge reg">{i("repeat","sm")}Trajet régulier</span></div><h2>Chaque lundi, mardi, jeudi et vendredi</h2></div>
-<div class="stack price-box" style="gap:2px"><span class="price" style="font-size:26px;line-height:30px">2,50 € <small>/ trajet</small></span><small class="fee">ce que tu paies, dont {euros(COMMISSION)} de commission</small></div></div>
+<div class="stack price-box" style="gap:2px"><span class="price" style="font-size:26px;line-height:30px">2,50 € <small>/ trajet</small></span></div></div>
 <div class="recur">
 <div class="stack" style="gap:6px"><span class="small muted">Tes jours</span>{days([0, 3, 4], pick=False, mini=True)}<span class="small muted">Léa conduit L M J V</span></div>
 <div class="stack" style="gap:2px"><span class="small muted">Période</span><b>Du 26 sept. au 19 déc. 2026</b><span class="small muted">12 semaines, hors vacances universitaires</span></div>
@@ -653,6 +713,7 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 </div>
 <ol class="troute" style="gap:22px">
 <li><time>7 h 50</time><span class="dot"></span><span class="place"><small>Départ</small><b>Noisy-le-Grand · Mont d'Est</b><span class="meet">{i("pin","sm")}Rendez-vous devant la pharmacie du Mont d'Est</span></span></li>
+{stop_lis(LEA_STOPS, ['<span class="small muted">Inès monte ici · parvis de la gare, côté bus</span>'])}
 <li><time>8 h 20</time><span class="dot"></span><span class="place"><small>Arrivée estimée</small><b>Cité Descartes · Copernic</b><span class="small muted">Parking P2, entrée nord</span></span></li>
 </ol>
 <div class="map" role="img" aria-label="Carte des zones de rendez-vous (fictive)">
@@ -702,9 +763,6 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <div class="row"><span class="avatar lg b">LM</span><div><h2>Léa M.</h2><p class="muted">Master Génie civil · conductrice</p><p>{stars("4,9", 38)}</p></div></div>
 <div class="row" style="gap:6px"><span class="badge ok">{i("shield","sm")}Compte universitaire vérifié</span><span class="badge line">42 trajets conduits</span></div>
 <div class="recap">
-<div class="between small"><span class="muted">Participation reversée à Léa</span><b class="num">{driver_share("2,50 €")}</b></div>
-<div class="between small"><span class="muted">Commission U-Mobility</span><b class="num">{euros(COMMISSION)}</b></div>
-<div class="divider"></div>
 <div class="between"><b>Prix par trajet</b><b class="num">2,50 €</b></div>
 </div>
 <button class="btn secondary block" type="button" data-open="demande">{i("join","sm")}Demander à rejoindre ce trajet</button>
@@ -737,11 +795,11 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <div data-step>
 {dhead("Demander à rejoindre", "Trajet de Léa · départ 7 h 50 · Noisy-le-Grand → Copernic", "join")}
 <div class="field"><span class="label">Jours souhaités</span>{days([3, 4], allowed=[0, 1, 3, 4])}<span class="hint">Trajet régulier : choisis parmi les jours proposés par Léa (lundi, mardi, jeudi, vendredi).</span></div>
+<div class="field"><span class="label">Où montes-tu ?</span><div class="seg board" data-single><button type="button" class="on" data-label="Mont d'Est · 7 h 50"><b>7 h 50</b> Mont d'Est · départ</button>{"".join(f'<button type="button" data-label="{z.split(" · ")[0]} · {t}"><b>{t}</b> {z.split(" · ")[0]} · arrêt {k}</button>' for k, (t, z) in enumerate(LEA_STOPS, 1))}</div><span class="hint">Le départ ou l'un des arrêts prévus par Léa, dans l'ordre du parcours.</span></div>
 <div class="field"><span class="label">Places</span><div class="stepper" data-max="2"><button class="iconbtn" type="button" aria-label="Moins">−</button><b>1</b><button class="iconbtn" type="button" aria-label="Plus">+</button></div></div>
 <div class="field"><label for="d-msg">Message à Léa <span class="muted" style="font-weight:400">(facultatif)</span></label>{textarea("d-msg", "Ex. : je peux être au point de rendez-vous 5 min avant.")}</div>
 <div class="recap"><div class="between small"><span class="muted">Période</span><b>du 26 sept. au 19 déc.</b></div>
-<div class="between small"><span class="muted">Participation reversée à Léa</span><b class="num">{driver_share("2,50 €")}</b></div>
-<div class="between small"><span class="muted">Commission U-Mobility</span><b class="num">{euros(COMMISSION)}</b></div>
+<div class="between small"><span class="muted">Montée</span><b data-board-out>Mont d'Est · 7 h 50</b></div>
 <div class="between small"><b>Prix par trajet</b><b class="num">2,50 €</b></div></div>
 <div class="dialog-foot"><button class="btn ghost" type="button" data-close>Annuler</button><button class="btn secondary" type="button" data-next data-loading>{i("send","sm")}Envoyer la demande</button></div>
 </div>
@@ -764,10 +822,27 @@ NOCAR = "mode:bike mode:walk mode:transit"
 modepick = "".join(f'<button type="button" class="m-{m}{" on" if m == "car" else ""}" data-show="mode:{m}" role="radio" aria-checked="{"true" if m == "car" else "false"}"><span class="mi">{i(ic)}</span><b>{lbl}</b><small>{MODE_HINT[m]}</small></button>' for m, (lbl, ic) in MODES.items())
 previews = "".join(
     f'<div data-when="mode:{m}"{"" if m == "car" else " hidden"}>' + (
-        trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 3, 3, 0, "Toi", "", None, ("Non-fumeur", "Musique"), go=False)
+        trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 3, 3, 0, "Toi", "", None, ("Non-fumeur", "Musique"), go=False, stops=PUB_STOPS)
         if m == "car" else
-        trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "", 0, 0, 0, "Toi", "", None, ("Calme", "À l'heure"), go=False, pax=["MD"], mode=m)
+        trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "", 0, 0, 0, "Toi", "", None, ("Calme", "À l'heure"), go=False, pax=["MD"], mode=m, stops=PUB_STOPS)
     ) + '</div>' for m in MODES)
+def stop_row(k, zone, t):
+    """Ligne d'arrêt de Publier : zone prédéfinie + heure estimée, réordonnable (app.js renumérote et renomme les id)."""
+    return (f'<li class="stop-row"><span class="stop-n" aria-hidden="true">{k}</span>'
+            f'<div class="field"><span class="label">Zone de l\'arrêt {k}</span>{select(f"p-stop{k}", zone or "Choisir une zone", "pin", dyn="dep")}</div>'
+            f'<div class="field"><label for="p-stop{k}-t">Heure estimée</label>{inp(f"p-stop{k}-t", t, "8 h 00", "clock")}</div>'
+            f'<div class="stop-acts"><button class="iconbtn" type="button" data-stop="up" aria-label="Avancer l\'arrêt {k}" title="Avancer">{i("up","sm")}</button>'
+            f'<button class="iconbtn" type="button" data-stop="down" aria-label="Reculer l\'arrêt {k}" title="Reculer">{i("down","sm")}</button>'
+            f'<button class="iconbtn del" type="button" data-stop="del" aria-label="Retirer l\'arrêt {k}" title="Retirer">{i("trash","sm")}</button></div></li>')
+
+stops_field = (f'<div class="field stops-field" data-max="{STOP_MAX}">'
+    f'<div class="tp-head"><span class="label">Arrêts intermédiaires <span class="muted" style="font-weight:400">(facultatif)</span></span><span class="tp-count"><b>{len(PUB_STOPS)}</b> / {STOP_MAX}</span></div>'
+    f'<ol class="stops">{"".join(stop_row(k, z, t) for k, (t, z) in enumerate(PUB_STOPS, 1))}</ol>'
+    f'<template class="stop-tpl">{stop_row(0, "", "")}</template>'
+    f'<div class="notice warn stop-warn" hidden>{i("info")}<span>Les heures doivent suivre l\'ordre du parcours : départ, arrêt 1, arrêt 2, puis arrivée.</span></div>'
+    f'<button class="btn sm ghost stop-add" type="button" data-stop="add">{i("plus","sm")}Ajouter un arrêt</button>'
+    f'<span class="hint">{STOP_MAX} arrêts au plus, dans l\'ordre du parcours. Les passagers choisissent de monter au départ ou à l\'un de tes arrêts.</span></div>')
+
 PAGES["publier"] = dict(title="Publier un trajet", mtitle="Publier", sub="En voiture, à vélo, à pied ou en transports en commun.", body=f'''
 <div class="split mode-scope m-car" data-show-scope>
 <section class="card">
@@ -785,9 +860,10 @@ PAGES["publier"] = dict(title="Publier un trajet", mtitle="Publier", sub="En voi
 <div class="field"><label for="p-arr-t">Arrivée estimée</label>{inp("p-arr-t", "8 h 20", "", "clock")}</div>
 <div class="field" data-when="regulier"><label for="p-period">Période</label>{inp("p-period", "26 sept. → 19 déc.", "", "calendar")}</div>
 </div>
+{stops_field}
 <div class="grid-3" data-when="mode:car">
 <div class="field"><span class="label">Places proposées</span><div class="stepper" data-max="3"><button class="iconbtn" type="button" aria-label="Moins">−</button><b>3</b><button class="iconbtn" type="button" aria-label="Plus">+</button></div></div>
-<div class="field"><label for="p-price">Participation par passager</label>{inp("p-price", "2,50 €")}<span class="hint">Suggestion : 2,40 € pour 12 km. Tu reçois <b>{driver_share("2,50 €")}</b> par passager, U-Mobility garde une commission de {euros(COMMISSION)}.</span></div>
+<div class="field"><label for="p-price">Participation par passager</label>{inp("p-price", "2,50 €")}<span class="hint">Suggestion : 2,40 € pour 12 km.</span></div>
 <div class="field"><span class="label">Véhicule</span>{select("p-car", "Renault Clio · grise · 3 places", "car", [("Mes véhicules", ["Renault Clio · grise · 3 places"])])}<button class="linkbtn" type="button" data-open="voiture" style="font-size:13px">{i("plus","sm")}Ajouter une voiture</button></div>
 </div>
 <div class="notice" data-when="{NOCAR}" hidden>{i("users")}<span>Sans voiture, pas de prix ni de limite de places : tout le monde peut rejoindre. Le trajet affiche le nombre de personnes qui ont rejoint.</span></div>
@@ -804,10 +880,10 @@ PAGES["publier"] = dict(title="Publier un trajet", mtitle="Publier", sub="En voi
 ''', modals="")  # modal voiture ajouté plus bas (partagé avec profil)
 
 # ================================================================== MES TRAJETS
-def req(init, name, rating, dd, places, note):
+def req(init, name, rating, dd, places, note, board="au départ"):
     msg = f'<span class="small">« {note} »</span>' if note else '<span class="small muted">Aucun message</span>'
     return (f'<div class="req"><span class="avatar">{init}</span><div class="grow"><b>{name} · {stars(rating)}</b>'
-            f'<div class="row" style="gap:8px"><span class="small muted">Jours demandés</span>{days(dd, pick=False, mini=True)}<span class="small muted">· {places}</span></div>{msg}</div>'
+            f'<div class="row" style="gap:8px"><span class="small muted">Jours demandés</span>{days(dd, pick=False, mini=True)}<span class="small muted">· {places} · monte {board}</span></div>{msg}</div>'
             f'<div class="acts"><button class="btn sm danger" type="button" data-toast="Demande de {name} refusée" data-remove=".req">{i("x","sm")}Refuser</button>'
             f'<button class="btn sm success" type="button" data-toast="{name} a rejoint le trajet" data-remove=".req">{i("check","sm")}Accepter</button></div></div>')
 
@@ -879,8 +955,8 @@ PAGES["mes-trajets"] = dict(title="Mes trajets", mtitle="Mes trajets", body=f'''
 <div class="between"><div class="row" style="gap:6px" data-filter-list="mt-list"><button class="chip on" data-radio data-filter="" type="button">Tous <span class="muted">5</span></button><button class="chip mchip r-d" data-radio data-filter="role-d" type="button">{i("wheel","sm")}Conducteur</button><button class="chip mchip r-p" data-radio data-filter="role-p" type="button">{i("seat","sm")}Passager</button>{"".join(f'<button class="chip mchip m-{m}" data-radio data-filter="m-{m}" type="button">{i(ic,"sm")}{lbl}</button>' for m, (lbl, ic) in MODES.items() if m != "car")}</div>
 <a class="more small" href="historique.html">Trajets passés et notes{i("chevr","sm")}</a></div>
 <div class="stack" id="mt-list">
-{trip("Demain · jeu. 25 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 1, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur",), status='<span class="badge ok">' + i("check","sm") + 'Place confirmée</span>', role="p", pax=["MD", "IN"], href="trajet.html#membre", cancel=f'<button class="btn sm danger" type="button" data-open="annuler">{i("x","sm")}Annuler ma place</button>')}
-{trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Toi", "", None, ("Non-fumeur", "Musique"), role="d", pax=["CL"], cancel=f'<button class="btn sm danger" type="button" data-open="annuler-trajet">{i("x","sm")}Annuler le trajet</button>', actions=f'<a class="btn sm ghost" href="publier.html">{i("edit","sm")}Modifier</a>')}
+{trip("Demain · jeu. 25 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 1, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur",), status='<span class="badge ok">' + i("check","sm") + 'Place confirmée</span>', role="p", pax=["MD", "IN"], href="trajet.html#membre", cancel=f'<button class="btn sm danger" type="button" data-open="annuler">{i("x","sm")}Annuler ma place</button>', stops=LEA_STOPS)}
+{trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Toi", "", None, ("Non-fumeur", "Musique"), role="d", pax=["CL"], cancel=f'<button class="btn sm danger" type="button" data-open="annuler-trajet">{i("x","sm")}Annuler le trajet</button>', actions=f'<a class="btn sm ghost" href="publier.html">{i("edit","sm")}Modifier</a>', stops=MY_STOPS)}
 {trip("Ven. 26 sept.", "Ponctuel", "17 h 45", "Cité Descartes · Bienvenüe", "18 h 10", "Torcy · Centre", "3,00 €", 2, 3, 0, "Yanis B.", "4,7", 12, ("Bagages",), status='<span class="badge wait">' + i("clock","sm") + 'Demande envoyée</span>', role="p", pax=["HP"], sent=True, cancel=f'<button class="btn sm danger" type="button" data-toast="Demande retirée" data-remove=".trip">{i("x","sm")}Retirer ma demande</button>')}
 {trip("Lun. 29 sept.", "L J", "17 h 30", "Cité Descartes · Copernic", "17 h 50", "Noisy-Champs · Gare RER A", "", 0, 0, 0, "Amina S.", "5,0", 22, ("Calme",), role="p", pax=["AS", "MD", "PR", "CL", "HP"], mode="bike", href="trajet.html#velo", cancel=f'<button class="btn sm danger" type="button" data-toast="Tu as quitté le trajet à vélo" data-remove=".trip">{i("leave","sm")}Quitter</button>')}
 {trip("Mer. 1er oct.", "Ponctuel", "18 h 00", "Cité Descartes · Copernic", "18 h 30", "Chelles · Gare", "2,00 €", 3, 3, 0, "Toi", "", None, (), role="d", cancel=f'<button class="btn sm danger" type="button" data-open="annuler-trajet">{i("x","sm")}Annuler le trajet</button>', actions=f'<a class="btn sm ghost" href="publier.html">{i("edit","sm")}Modifier</a>')}
@@ -895,7 +971,7 @@ PAGES["mon-trajet"] = dict(title="Mon trajet", mtitle="Mon trajet", back="mes-tr
 <div class="stack-lg">
 <section class="card">
 <div class="between" style="align-items:flex-start"><div class="stack" style="gap:6px;justify-items:start"><div class="row" style="gap:6px">{role_tag("d")}{mode_tag("car")}<span class="badge reg">{i("repeat","sm")}Trajet régulier</span></div><h2>Chaque lundi, mardi, jeudi et vendredi</h2></div>
-<div class="stack price-box" style="gap:2px"><span class="price" style="font-size:26px;line-height:30px">2,50 € <small>/ passager</small></span><small class="fee">tu reçois {driver_share("2,50 €")} par passager</small></div></div>
+<div class="stack price-box" style="gap:2px"><span class="price" style="font-size:26px;line-height:30px">2,50 € <small>/ passager</small></span></div></div>
 <div class="recur">
 <div class="stack" style="gap:6px"><span class="small muted">Jours</span>{days([0, 1, 3, 4], pick=False, mini=True)}</div>
 <div class="stack" style="gap:2px"><span class="small muted">Période</span><b>Du 26 sept. au 19 déc. 2026</b><span class="small muted">12 semaines, hors vacances universitaires</span></div>
@@ -903,10 +979,12 @@ PAGES["mon-trajet"] = dict(title="Mon trajet", mtitle="Mon trajet", back="mes-tr
 </div>
 <ol class="troute" style="gap:22px">
 <li><time>7 h 50</time><span class="dot"></span><span class="place"><small>Départ</small><b>Noisy-le-Grand · Mont d'Est</b><span class="small muted">Précise le point exact aux passagers dans la messagerie</span></span></li>
+{stop_lis(MY_STOPS, ['<span class="small muted">Inès et Thomas demandent à monter ici</span>', '<span class="small muted">Chloé monte ici</span>'])}
 <li><time>8 h 20</time><span class="dot"></span><span class="place"><small>Arrivée estimée</small><b>Cité Descartes · Copernic</b><span class="small muted">Parking P2, entrée nord</span></span></li>
 </ol>
 <div class="grid-auto">
 <div class="stack" style="gap:2px"><span class="small muted">Places</span><b>1 prise sur 3</b></div>
+<div class="stack" style="gap:2px"><span class="small muted">Arrêts</span><b>{len(MY_STOPS)} sur {STOP_MAX}</b></div>
 <div class="stack" style="gap:2px"><span class="small muted">Véhicule</span><b>Clio grise</b></div>
 <div class="stack" style="gap:2px"><span class="small muted">CO₂ évité / trajet</span><b>1,4 kg</b></div>
 </div>
@@ -915,8 +993,8 @@ PAGES["mon-trajet"] = dict(title="Mon trajet", mtitle="Mon trajet", back="mes-tr
 <section class="card" id="demandes">
 <div class="card-head"><div><h2>Demandes en attente</h2><p class="small muted">Accepte ou refuse chaque passager. Sans réponse sous 24 h, la demande est refusée automatiquement.</p></div><span class="badge wait">{i("hourglass","sm")}2 en attente</span></div>
 <div class="req-list">
-{req("IN", "Inès N.", "4,8", [3, 4], "1 place", "Je peux être au Mont d'Est 5 min avant.")}
-{req("TK", "Thomas K.", "4,5", [4], "1 place", "")}
+{req("IN", "Inès N.", "4,8", [3, 4], "1 place", "Je t'attendrai côté gare routière.", "à Noisy-Champs (arrêt 1)")}
+{req("TK", "Thomas K.", "4,5", [4], "1 place", "", "à Noisy-Champs (arrêt 1)")}
 </div>
 </section>
 </div>
@@ -924,7 +1002,7 @@ PAGES["mon-trajet"] = dict(title="Mon trajet", mtitle="Mon trajet", back="mes-tr
 <section class="card">
 <div class="card-head"><h2>Passagers</h2><span class="badge seats">2 places restantes</span></div>
 <div class="list">
-<div class="li"><span class="avatar sm">CL</span><div class="grow"><b>Chloé L. · {stars("4,7")}</b><span>Passagère · V</span></div><button class="iconbtn flag" type="button" data-open="signaler-compte" aria-label="Signaler Chloé" title="Signaler Chloé">{i("flag","sm")}</button></div>
+<div class="li"><span class="avatar sm">CL</span><div class="grow"><b>Chloé L. · {stars("4,7")}</b><span>Passagère · V · monte à Nesles (arrêt 2)</span></div><button class="iconbtn flag" type="button" data-open="signaler-compte" aria-label="Signaler Chloé" title="Signaler Chloé">{i("flag","sm")}</button></div>
 <div class="li"><span class="seat-free lg" aria-hidden="true"></span><div class="grow"><b class="muted">Place libre</b></div></div>
 <div class="li"><span class="seat-free lg" aria-hidden="true"></span><div class="grow"><b class="muted">Place libre</b></div></div>
 </div>
@@ -1144,6 +1222,7 @@ PAGES["profil"] = dict(title="Profil", mtitle="Profil", body=f'''
 <h2>Confidentialité et données</h2>
 <p class="small muted">U-Mobility applique le RGPD : tu peux consulter, exporter ou effacer tes données à tout moment.</p>
 <div class="list">
+<a class="li click" href="donnees.html"><span class="iconbtn">{i("shield","sm")}</span><div class="grow"><b>Comment sont gérées mes données</b><span>Ce qui est collecté, pourquoi, qui le voit, combien de temps, tes droits</span></div>{i("chevr","sm")}</a>
 <div class="li"><span class="iconbtn">{i("download","sm")}</span><div class="grow"><b>Télécharger mes données</b><span>Profil, trajets, notes et messages (JSON ou CSV)</span></div><button class="btn sm ghost" type="button" data-open="export-donnees">Télécharger</button></div>
 <div class="li"><span class="iconbtn">{i("eye","sm")}</span><div class="grow"><b>Visibilité du profil</b><span>Nom complet visible uniquement par les membres de tes trajets</span></div><button class="toggle on" type="button" aria-pressed="true" aria-label="Visibilité limitée"></button></div>
 <div class="li"><span class="iconbtn" style="color:var(--danger)">{i("trash","sm")}</span><div class="grow"><b>Supprimer mon compte et mes données</b><span>Effacement définitif de tes données personnelles</span></div><button class="btn sm danger" type="button" data-open="supprimer-compte">Supprimer</button></div>
@@ -1162,6 +1241,129 @@ PAGES["profil"] = dict(title="Profil", mtitle="Profil", body=f'''
 </aside>
 </div>
 ''', modals=creneau + voiture + edit_profile + export + delete)
+
+# ================================================================== DONNÉES PERSONNELLES (RGPD)
+# Information des personnes (RGPD art. 13) : qui traite, quoi, pourquoi, qui voit, combien de temps, tes droits.
+# Accessible à tous les rôles, depuis la connexion et le Profil. Le sommaire fait défiler la page (data-scroll, pas d'ancre : les ancres sont des états).
+RGPD_SECTIONS = [("d-resp", "Qui est responsable"), ("d-quoi", "Données et finalités"), ("d-jamais", "Ce qu'on ne collecte pas"),
+                 ("d-qui", "Qui voit quoi"), ("d-duree", "Durées de conservation"), ("d-cookies", "Cookies et sécurité"), ("d-droits", "Tes droits")]
+rgpd_toc = "".join(f'<button type="button" data-scroll="{k}"><span class="n">{n}</span>{t}</button>' for n, (k, t) in enumerate(RGPD_SECTIONS, 1))
+rgpd_key = "".join(f'<div class="stat"><span class="k">{i(ic,"sm")}{k}</span><b>{t}</b><span class="d">{d}</span></div>' for ic, k, t, d in [
+    ("pin", "Localisation", "Ni adresse, ni GPS", "Seulement des zones définies par l'université"),
+    ("eyeoff", "Partage", "Aucune revente", "Pas de publicité ni de partenaire commercial"),
+    ("shield", "Hébergement", "En France", "Serveurs de l'université, aucun transfert hors UE"),
+    ("download", "Contrôle", "Tu gardes la main", "Export et suppression en un clic"),
+])
+RGPD_DATA = [  # icône, donnée, exemples, finalité, base légale (article 6 du RGPD)
+    ("user", "Identité universitaire", "Prénom, nom, e-mail universitaire, formation, campus", "Créer ton compte et vérifier que tu fais partie de l'université", "Mission d'intérêt public (6.1.e)"),
+    ("route", "Trajets", "Zones de départ, d'arrêt et d'arrivée, horaires, jours, mode, places", "Publier, rechercher et rejoindre des trajets", "Conditions d'utilisation (6.1.b)"),
+    ("car", "Véhicule", "Modèle, couleur, nombre de places (jamais la plaque)", "Permettre aux passagers de reconnaître la voiture", "Conditions d'utilisation (6.1.b)"),
+    ("msg", "Messages et notes", "Messages des trajets, notes sur 5 étoiles", "Organiser les trajets et entretenir la confiance", "Conditions d'utilisation (6.1.b)"),
+    ("tag", "Préférences", "Tags « Ce qui compte pour moi », horaires types, modes de déplacement", "Te proposer les trajets les plus compatibles", "Consentement (6.1.a)"),
+    ("flag", "Signalements", "Motif, détails, décision de modération", "Protéger les membres, traiter les abus", "Mission d'intérêt public (6.1.e)"),
+    ("chart", "Statistiques", "Trajets et modes, agrégés et anonymisés", "Plan de mobilité de l'université, CO₂ évité", "Mission d'intérêt public (6.1.e)"),
+    ("lock", "Journaux de connexion", "Date, heure, adresse IP", "Sécurité du service", "Obligation légale (6.1.c)"),
+]
+rgpd_rows = "".join(f'<tr><td><span class="dk">{i(ic,"sm")}<b>{d}</b></span><span class="small muted">{ex}</span></td><td>{f}</td><td><span class="badge line">{b}</span></td></tr>'
+                    for ic, d, ex, f, b in RGPD_DATA)
+rgpd_never = "".join(f'<div class="li"><span class="sr-ico ok">{i(ic,"sm")}</span><div class="grow"><b>{t}</b><span>{d}</span></div></div>' for ic, t, d in [
+    ("pin", "Ton adresse et ta position", "Tu choisis une zone de rendez-vous dans une liste : pas de géolocalisation, jamais."),
+    ("car", "Ta plaque d'immatriculation", "Le modèle et la couleur suffisent pour reconnaître la voiture."),
+    ("shield", "Des données sur ta santé ou ta vie privée", "« Accessible PMR » ou « Entre filles » décrivent un trajet. Cochés dans tes préférences, ils ne sont visibles que par toi."),
+    ("eyeoff", "Des traceurs publicitaires", "Aucune mesure d'audience tierce, aucun pixel, aucune police chargée depuis un autre site."),
+])
+rgpd_who = "".join(f'<div class="li"><span class="sr-ico {c}">{i(ic,"sm")}</span><div class="grow"><b>{t}</b><span>{d}</span></div></div>' for c, ic, t, d in [
+    ("w-all", "users", "Tous les membres U-Mobility", "Ton prénom et l'initiale de ton nom, ta formation, ton campus, ta note moyenne et les trajets que tu publies."),
+    ("w-trip", "car", "Les membres de tes trajets", "En plus : ton nom complet (si tu l'autorises), le point de rendez-vous exact et la messagerie du trajet. Une demande en attente ne donne accès à rien de tout ça."),
+    ("w-mod", "flag", "L'équipe de modération", "Seulement le dossier d'un signalement : le trajet et les messages concernés. Chaque consultation est journalisée."),
+    ("w-admin", "chart", "Les administrateurs", "Des statistiques anonymisées : aucun groupe de moins de 10 personnes n'est affiché."),
+])
+rgpd_keep = "".join(f'<tr><td><b>{d}</b></td><td>{t}</td></tr>' for d, t in [
+    ("Compte", "Tant que tu l'utilises. Sans connexion pendant 2 ans, il est supprimé (e-mail de rappel 30 jours avant)."),
+    ("Trajets et historique", "1 an après la date du trajet, puis anonymisés pour les statistiques."),
+    ("Messages", "6 mois après la fin du trajet (ou de la période d'un trajet régulier)."),
+    ("Notes", "Ta note moyenne tant que ton compte existe ; le détail des notes 1 an."),
+    ("Signalements", "1 an après la décision de modération."),
+    ("Journaux de connexion", "1 an, comme l'exige la loi."),
+    ("Après suppression du compte", "Effacement sous 30 jours, sauf les journaux et un signalement en cours d'examen."),
+])
+RIGHTS = [  # icône, droit, explication, action
+    ("eye", "Accès et portabilité", "Récupérer toutes tes données dans un fichier lisible (JSON ou CSV).", '<a class="btn sm ghost" href="profil.html#export-donnees">Télécharger mes données</a>'),
+    ("edit", "Rectification", "Corriger ton profil, tes zones, tes horaires et tes véhicules.", '<a class="btn sm ghost" href="profil.html#modifier-profil">Modifier mon profil</a>'),
+    ("trash", "Effacement", "Supprimer ton compte et tes données personnelles.", '<a class="btn sm danger" href="profil.html#supprimer-compte">Supprimer mon compte</a>'),
+    ("x", "Opposition et limitation", "Refuser un traitement ou le suspendre le temps d'une vérification.", '<button class="btn sm ghost" type="button" data-open="exercer-droits">Écrire au DPO</button>'),
+    ("tag", "Retrait du consentement", "Décocher tes préférences à tout moment, sans conséquence sur tes trajets.", '<a class="btn sm ghost" href="profil.html">Mes préférences</a>'),
+]
+rgpd_rights = "".join(f'<div class="li"><span class="sr-ico b">{i(ic,"sm")}</span><div class="grow"><b>{t}</b><span>{d}</span></div>{a}</div>' for ic, t, d, a in RIGHTS)
+M_DROITS = modal("exercer-droits", f'''
+<div data-step>
+{dhead("Exercer mes droits", "Ta demande est envoyée au délégué à la protection des données de l'université.", "shield")}
+<div class="field"><span class="label">Ta demande</span><div class="row" style="gap:6px">{"".join(f'<button class="chip{" on" if k == 0 else ""}" data-radio type="button">{m}</button>' for k, m in enumerate(["Accès", "Rectification", "Effacement", "Opposition", "Limitation", "Portabilité", "Question"]))}</div></div>
+<div class="field"><label for="dpo-msg">Précise ta demande</label>{textarea("dpo-msg", "Ex. : je souhaite connaître les données conservées sur mes signalements.", 1000)}</div>
+<div class="notice">{i("info")}<span>La réponse arrive sur ton e-mail universitaire sous un mois. La demande est liée à ton compte, ce qui suffit à vérifier ton identité.</span></div>
+<div class="dialog-foot"><button class="btn ghost" type="button" data-close>Annuler</button><button class="btn" type="button" data-next data-loading>{i("send","sm")}Envoyer la demande</button></div>
+</div>
+<div data-step hidden>{success("Demande envoyée", "Le DPO de l'université te répond sur ton e-mail universitaire sous un mois.")}</div>
+''')
+PAGES["donnees"] = dict(title="Données personnelles", mtitle="Mes données", back="profil", active="profil", roles=("user", "mod", "admin"),
+                        sub="Comment U-Mobility collecte, utilise et protège tes données.", modals=M_DROITS, body=f'''
+<section class="hero rgpd-hero"><span class="arc a1" aria-hidden="true"></span><span class="arc a2" aria-hidden="true"></span>
+<h1>Tes données restent à l'université</h1>
+<p>U-Mobility ne collecte que ce qui sert à covoiturer entre membres de l'Université Gustave Eiffel. Voici, en clair, ce qu'on garde, pourquoi, qui le voit et comment tout récupérer ou effacer.</p>
+<div class="cta"><a class="btn light" href="profil.html#export-donnees">{i("download","sm")}Télécharger mes données</a><button class="btn secondary" type="button" data-open="exercer-droits">{i("send","sm")}Exercer mes droits</button></div>
+</section>
+<div class="grid-4 rgpd-key">{rgpd_key}</div>
+<div class="split rgpd">
+<div class="stack-lg">
+<section class="card" id="d-resp">
+<h2><span class="n">1</span>Qui est responsable de tes données ?</h2>
+<p>L'<b>Université Gustave Eiffel</b> (5 boulevard Descartes, Champs-sur-Marne, 77454 Marne-la-Vallée cedex 2) est responsable du traitement. U-Mobility est développé et hébergé par l'université : aucun prestataire commercial n'a accès aux données.</p>
+<div class="notice">{i("user")}<span>Délégué à la protection des données (DPO) : <b>dpo@univ-eiffel.fr</b>. Écris-lui pour toute question ou pour exercer tes droits.</span></div>
+</section>
+<section class="card" id="d-quoi">
+<h2><span class="n">2</span>Quelles données, pour quoi faire ?</h2>
+<p class="muted">Chaque donnée a une finalité précise et une base légale prévue par l'article 6 du RGPD.</p>
+<div class="table-wrap"><table class="table rgpd-table"><thead><tr><th>Donnée</th><th>Pour quoi faire</th><th>Base légale</th></tr></thead><tbody>{rgpd_rows}</tbody></table></div>
+</section>
+<section class="card" id="d-jamais">
+<h2><span class="n">3</span>Ce qu'on ne collecte jamais</h2>
+<div class="list">{rgpd_never}</div>
+</section>
+<section class="card" id="d-qui">
+<h2><span class="n">4</span>Qui voit quoi ?</h2>
+<div class="list">{rgpd_who}</div>
+<div class="notice">{i("eyeoff")}<span>Tu peux réserver ton nom complet aux membres de tes trajets dans Profil → Confidentialité et données. Tes données ne sont jamais vendues ni transmises à des tiers.</span></div>
+</section>
+<section class="card" id="d-duree">
+<h2><span class="n">5</span>Combien de temps on les garde</h2>
+<div class="table-wrap"><table class="table rgpd-table"><thead><tr><th>Donnée</th><th>Durée de conservation</th></tr></thead><tbody>{rgpd_keep}</tbody></table></div>
+</section>
+<section class="card" id="d-cookies">
+<h2><span class="n">6</span>Cookies et sécurité</h2>
+<div class="grid-2">
+<div class="stack" style="gap:4px"><b>Un seul cookie, indispensable</b><span class="small muted">Il garde ta session ouverte. Pas de cookie de mesure d'audience ni de publicité : c'est pour ça qu'il n'y a pas de bandeau à accepter.</span></div>
+<div class="stack" style="gap:4px"><b>Des échanges chiffrés</b><span class="small muted">Connexion avec ton compte universitaire, échanges en HTTPS, sauvegardes chiffrées, accès de l'équipe de modération journalisés.</span></div>
+</div>
+</section>
+<section class="card" id="d-droits">
+<h2><span class="n">7</span>Tes droits</h2>
+<p class="muted">Tu peux les exercer à tout moment, gratuitement. L'université te répond sous un mois.</p>
+<div class="list rights">{rgpd_rights}</div>
+<div class="notice warn">{i("info")}<span>Si la réponse ne te convient pas, tu peux adresser une réclamation à la <b>CNIL</b> (cnil.fr · 3 place de Fontenoy, 75007 Paris).</span></div>
+</section>
+<p class="small muted">Dernière mise à jour : 27 septembre 2026 · version 1.0</p>
+</div>
+<aside class="stack-lg rgpd-aside">
+<nav class="card toc hide-m" aria-label="Sommaire"><h2>Sommaire</h2><div class="stack" style="gap:2px">{rgpd_toc}</div></nav>
+<section class="card">
+<h2>Une question ?</h2>
+<p class="small muted">Le DPO de l'université répond à toutes les questions sur tes données.</p>
+<button class="btn block" type="button" data-open="exercer-droits">{i("send","sm")}Écrire au DPO</button>
+<a class="btn ghost block" href="profil.html">{i("user","sm")}Retour au profil</a>
+</section>
+</aside>
+</div>
+''')
 
 # ================================================================== MODÉRATION
 sig = [
@@ -1268,7 +1470,9 @@ PAGES["back-office"] = dict(title="Back office · statistiques", roles=("admin",
 
 # ================================================================== PLAN
 PLAN = [
-    ("Accès", "", [("connexion.html", "Connexion", "Comptes de démonstration par rôle")]),
+    ("Accès", "", [("connexion.html", "Connexion", "Comptes de démonstration par rôle"),
+                   ("suspendu.html", "Compte suspendu", "Durée, jours restants, ce qui est bloqué"),
+                   ("suspendu.html#contester", "Popup · contester la suspension", "")]),
     ("Utilisateur", "user", [
         ("index.html", "Tableau de bord", "Activité façon GitHub, prochains trajets, trajets à noter"),
         ("recherche.html", "Rechercher un trajet", "Modes de déplacement, zones du campus, tags, filtres"),
@@ -1280,7 +1484,7 @@ PLAN = [
         ("mon-trajet.html", "Mon trajet (conducteur)", "Passagers, demandes à accepter ou refuser"),
         ("mon-trajet.html#annuler-trajet", "Popup · annuler le trajet (conducteur)", ""),
         ("mon-trajet.html#signaler-compte", "Popup · signaler un passager", ""),
-        ("publier.html", "Publier un trajet", "Voiture, vélo, à pied ou transports ; tags facultatifs"),
+        ("publier.html", "Publier un trajet", "Voiture, vélo, à pied ou transports ; 2 arrêts au plus ; tags facultatifs"),
         ("publier.html#voiture", "Popup · ajouter une voiture", ""),
         ("mes-trajets.html", "Mes trajets", "Trajets à venir des deux rôles, annulation claire"),
         ("mes-trajets.html#annuler", "Popup · annuler ma place", ""),
@@ -1298,6 +1502,8 @@ PLAN = [
         ("profil.html#voiture", "Popup · ajouter une voiture", ""),
         ("profil.html#export-donnees", "Popup · télécharger mes données", "RGPD"),
         ("profil.html#supprimer-compte", "Popup · supprimer mon compte", "RGPD"),
+        ("donnees.html", "Données personnelles", "RGPD : données, finalités, destinataires, durées, droits"),
+        ("donnees.html#exercer-droits", "Popup · exercer mes droits", "Demande au DPO"),
         ("index.html#loader", "Loader", "Chargement entre les pages"),
     ]),
     ("Modérateur", "mod", [("moderation.html", "Signalements", "Réservé aux modérateurs et administrateurs"), ("moderation.html#signalement", "Dossier de signalement", "Panneau latéral")]),
@@ -1395,7 +1601,7 @@ for k, p in PAGES.items():
 logo = "data:image/png;base64," + base64.b64encode(open(os.path.join(ASSETS, "logo-blanc.png"), "rb").read()).decode()
 logo_ld = "data:image/png;base64," + base64.b64encode(open(os.path.join(ASSETS, "logo-loader.png"), "rb").read()).decode()
 def emb(s): return s.replace("assets/logo-blanc.png", logo).replace("assets/logo-loader.png", logo_ld)
-order = ["plan", "connexion", "index", "recherche", "trajet", "mon-trajet", "publier", "mes-trajets", "historique", "messages", "profil", "moderation", "back-office"]
+order = ["plan", "connexion", "suspendu", "index", "recherche", "trajet", "mon-trajet", "publier", "mes-trajets", "historique", "messages", "profil", "donnees", "moderation", "back-office"]
 opts = "".join(f'<option value="{k}">{PAGES[k]["title"]}</option>' for k in order)
 tpls = "".join(f'<template id="tpl-{k}">{PAGES[k]["app"]}</template><template id="tpl-{k}-m">{PAGES[k]["modals"]}</template>' for k in order)
 SHELL_CSS = '''

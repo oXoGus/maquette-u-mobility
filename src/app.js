@@ -201,7 +201,11 @@
     if ((el = t.closest('[data-loadtoast]'))) { e.preventDefault(); var msg = el.getAttribute('data-loadtoast'); loader(800, function () { toast(msg); }); return; }
     if ((el = t.closest('[data-tab]'))) { e.preventDefault(); activateTab(el.getAttribute('data-tab')); return; }
     if ((el = t.closest('[data-toast]'))) { e.preventDefault(); toast(el.getAttribute('data-toast')); if (el.hasAttribute('data-remove')) { var c = el.closest(el.getAttribute('data-remove')); if (c) { c.style.transition = 'opacity .2s'; c.style.opacity = '0'; setTimeout(function () { c.remove(); }, 200); } } return; }
+    if ((el = t.closest('[data-scroll]'))) { var tg = document.getElementById(el.getAttribute('data-scroll')); if (tg) { tg.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' }); tg.setAttribute('tabindex', '-1'); tg.focus({ preventScroll: true }); } return; }
+    if ((el = t.closest('[data-stop]'))) { e.preventDefault(); stopAction(el); return; }
     if ((el = t.closest('[data-single] > button'))) {
+      // Demande de réservation : le point de montée choisi s'affiche dans le récapitulatif
+      if (el.hasAttribute('data-label')) { var bo = el.closest('.dialog, .modal') && el.closest('.dialog, .modal').querySelector('[data-board-out]'); if (bo) bo.textContent = el.getAttribute('data-label'); }
       $$('button', el.parentNode).forEach(function (b) { b.classList.toggle('on', b === el); if (b.hasAttribute('role')) b.setAttribute('aria-checked', b === el); });
       // data-show="x" ou "groupe:x" : n'affecte que les data-when du même groupe (ex. mode:car / regulier)
       var sw = el.getAttribute('data-show');
@@ -264,6 +268,8 @@
   document.addEventListener('input', function (e) {
     var el = e.target;
     if (el.hasAttribute && el.hasAttribute('maxlength')) { var c = el.closest('.field') && el.closest('.field').querySelector('.counter'); if (c) c.textContent = el.value.length + ' / ' + el.getAttribute('maxlength'); }
+    var sf = el.closest && (el.closest('.stops-field') || ((el.id === 'p-dep-t' || el.id === 'p-arr-t') && $('.stops-field')));
+    if (sf) syncStops(sf);
     if (el.id === 'del-confirm') { var btn = document.getElementById('del-go'); if (btn) { var ok = el.value.trim().toUpperCase() === 'SUPPRIMER'; btn.disabled = !ok; btn.classList.toggle('is-disabled', !ok); } }
   });
 
@@ -291,6 +297,53 @@
     });
     var c = f && f.querySelector('.tp-count b'); if (c) c.textContent = n;
     var x = f && f.querySelector('.tp-clear'); if (x) x.hidden = !n;
+  }
+
+  /* ---------- Arrêts intermédiaires (Publier) : 2 au plus, zone + heure estimée, ordonnés à la main ---------- */
+  var stopUid = 0;
+  function toMin(v) { var m = (v || '').match(/(\d{1,2})\s*h\s*(\d{0,2})/); return m ? +m[1] * 60 + (+m[2] || 0) : null; }
+  var STOP_LBL = { up: "Avancer l'arrêt ", down: "Reculer l'arrêt ", del: "Retirer l'arrêt " };
+  function syncStops(box) {
+    var rows = $$('.stops > .stop-row', box), max = parseInt(box.getAttribute('data-max') || '2', 10);
+    rows.forEach(function (r, k) {
+      var n = k + 1;
+      r.querySelector('.stop-n').textContent = n;
+      r.querySelector('.field .label').textContent = "Zone de l'arrêt " + n;
+      $$('[data-stop]', r).forEach(function (b) { b.setAttribute('aria-label', STOP_LBL[b.getAttribute('data-stop')] + n); });
+      r.querySelector('[data-stop="up"]').disabled = k === 0;
+      r.querySelector('[data-stop="down"]').disabled = k === rows.length - 1;
+    });
+    var add = $('.stop-add', box), full = rows.length >= max;
+    if (add) { add.disabled = full; add.lastChild.textContent = full ? max + ' arrêts maximum' : 'Ajouter un arrêt'; }
+    var c = $('.tp-count b', box); if (c) c.textContent = rows.length;
+    // Les heures suivent l'ordre du parcours : départ < arrêt 1 < arrêt 2 < arrivée
+    var dep = $('#p-dep-t'), arr = $('#p-arr-t'), prev = dep ? toMin(dep.value) : null, end = arr ? toMin(arr.value) : null, bad = false;
+    rows.forEach(function (r) {
+      var v = toMin(r.querySelector('input').value);
+      var ko = v !== null && ((prev !== null && v <= prev) || (end !== null && v >= end));
+      r.classList.toggle('bad', ko); bad = bad || ko;
+      if (v !== null) prev = v;
+    });
+    var w = $('.stop-warn', box); if (w) w.hidden = !bad;
+  }
+  function stopAction(el) {
+    var box = el.closest('.stops-field'), list = $('.stops', box), act = el.getAttribute('data-stop'), row = el.closest('.stop-row');
+    if (act === 'add') {
+      if ($$('.stop-row', list).length >= parseInt(box.getAttribute('data-max') || '2', 10)) return;
+      var tpl = $('.stop-tpl', box), li = tpl.content.firstElementChild.cloneNode(true);
+      stopUid++;
+      $$('[id]', li).forEach(function (x) { x.id = x.id.replace('p-stop0', 'p-stop-n' + stopUid); });
+      $$('label[for]', li).forEach(function (x) { x.setAttribute('for', x.getAttribute('for').replace('p-stop0', 'p-stop-n' + stopUid)); });
+      list.appendChild(li); syncStops(box);
+      li.querySelector('.select > button').focus();
+    } else if (act === 'del') {
+      row.remove(); syncStops(box); toast('Arrêt retiré');
+      var b = $('.stop-add', box); if (b) b.focus();
+    } else if (act === 'up' && row.previousElementSibling) {
+      list.insertBefore(row, row.previousElementSibling); syncStops(box); (el.disabled ? row.querySelector('[data-stop="down"]') : el).focus();
+    } else if (act === 'down' && row.nextElementSibling) {
+      list.insertBefore(row.nextElementSibling, row); syncStops(box); (el.disabled ? row.querySelector('[data-stop="up"]') : el).focus();
+    }
   }
 
   /* ---------- Statistiques : les nombres montent de 0 à leur valeur (courbe de Bézier cubique) ---------- */
@@ -364,10 +417,24 @@
   }
   window.UMOB_navigate = navigate;
 
+  /* ---------- Bandeau du tableau de bord : anneau d'une couleur secondaire tirée au hasard à chaque arrivée ---------- */
+  var RINGS = ['magenta', 'turquoise', 'bleu', 'vertclair', 'jaune', 'orange', 'vert']; // violet et bleu nuit : trop peu visibles sur le bleu UGE
+  var lastRing = null;
+  function initRing() {
+    if (document.documentElement.classList.contains('figma')) return; // import Figma : magenta stable (styles.css)
+    $$('.hero.compact').forEach(function (h) {
+      var pool = RINGS.filter(function (c) { return c !== lastRing; });
+      lastRing = pool[Math.floor(Math.random() * pool.length)];
+      h.style.setProperty('--ring', 'var(--c-' + lastRing + ')');
+    });
+  }
+
   function init() {
     $$('.rate').forEach(function (r) { setRate(r, parseInt(r.getAttribute('data-value') || '0', 10)); });
     initRole();
     initCounters();
+    initRing();
+    $$('.stops-field').forEach(syncStops);
   }
 
   if (SPA) {
