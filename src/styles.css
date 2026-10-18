@@ -13,6 +13,7 @@
   --secondary: #8b4a97;        /* violet UGE */
   --secondary-hover: #763e81;
   --accent: #fbba00;           /* jaune UGE : compteurs et nouveautés, toujours avec --on-accent */
+  --accent-hover: #e0a600;     /* jaune UGE assombri (survol du bouton « Donner mon avis ») */
   --on-accent: #0f273b;
   --surface: #f2f2f3;          /* gris des pages de la charte */
   --surface-raised: #ffffff;
@@ -754,6 +755,8 @@ a.li:hover, .li.click:hover { background: var(--surface); }
 .demobar .seg > button:hover { background: rgba(255, 255, 255, .18); }
 .demobar .seg > button.on { background: #fff; color: var(--ink); }
 .demobar .btn.sm { min-height: 34px; padding: 0 14px; }
+.demobar .btn.accent { background: var(--accent); color: var(--on-accent); }
+.demobar .btn.accent:hover { background: var(--accent-hover); }
 .figma .demobar { display: none; }
 .figma .tabbar { position: relative; }
 @media (max-width: 900px) {

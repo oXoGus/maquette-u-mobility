@@ -410,9 +410,13 @@ def app_page(key, title, body, roles=("user",), active=None, sub="", mtitle=None
 </div>'''
 
 
-# Barre de démo (maquette uniquement) : changer de rôle depuis n'importe quelle page + accès au plan de toutes les pages.
+# Bêta-test : lien vers le Google Form de retours (bouton « Donner mon avis » de la barre de démo).
+BETA_FORM = "https://forms.gle/WMSWoxK83A2rpWDDA"
+
+# Barre de démo (maquette uniquement) : changer de rôle depuis n'importe quelle page + avis bêta-test + accès au plan de toutes les pages.
 DEMOBAR = (f'<div class="demobar" role="toolbar" aria-label="Outils de la maquette"><span class="lbl">Voir en tant que</span>'
            f'<div class="seg"><button type="button" data-role="user">Utilisateur</button><button type="button" data-role="mod">Modérateur</button><button type="button" data-role="admin">Admin</button></div>'
+           f'<a class="btn sm accent" href="{BETA_FORM}" target="_blank" rel="noopener" aria-label="Donner mon avis (formulaire du bêta-test, nouvel onglet)" title="Donner mon avis sur la maquette">{i("msg","sm")}<span>Donner mon avis</span></a>'
            f'<a class="btn sm light" href="plan.html" title="Toutes les pages de la maquette">{i("grid","sm")}<span>Toutes les pages</span></a></div>')
 
 
