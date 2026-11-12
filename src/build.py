@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """U-Mobility v3 — génère le site statique (export Figma) et l'aperçu artifact (une page)."""
-import os, base64, random, datetime, shutil, html as H
+import os, re, zlib, base64, random, datetime, shutil, html as H
 
 ROOT = os.path.dirname(os.path.abspath(__file__))                 # src/
 EXPORT = os.environ.get("OUT", os.path.join(ROOT, "..", "dist"))  # dist/ (généré, ignoré par git)
@@ -28,7 +28,6 @@ P = {
     "settings": '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
     "edit": '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
     "trash": '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
-    "bell": '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
     "filter": '<path d="M4 5h16M7 12h10M10 19h4"/>',
     "arrow": '<path d="M5 12h14M13 6l6 6-6 6"/>',
     "back": '<path d="M19 12H5M11 6l-6 6 6 6"/>',
@@ -59,6 +58,7 @@ P = {
     "grid": '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>',
     "campus": '<path d="M3 10l9-5 9 5-9 5z"/><path d="M7 12.5V17c1.5 1.5 3 2 5 2s3.5-.5 5-2v-4.5"/><path d="M21 10v5"/>',
     "hourglass": '<path d="M6 3h12M6 21h12M7 3c0 5 10 5 10 9s-10 4-10 9M17 3c0 5-10 5-10 9s10 4 10 9"/>',
+    "image": '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
     # Icônes des tags (catalogue TAGS)
     "moon": '<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/>',
     "music": '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
@@ -81,6 +81,11 @@ def i(name, cls=""):
 def stars(avg, n=None):
     tail = f' <span class="n">({n})</span>' if n else ""
     return f'<span class="stars">{STAR_SVG}{avg}{tail}</span>'
+
+
+def av_cls(ini):
+    """Couleur d'avatar stable par personne (initiales) : av0…av6, voir color_avatars()."""
+    return f"av{zlib.crc32(('u-mobility' + ini).encode()) % 7}"
 
 
 def stars5(k):
@@ -153,9 +158,12 @@ def inp(id_, value="", ph="", icon=None, typ="text"):
     return f'<div class="input">{ic}<input id="{id_}" type="{typ}" value="{H.escape(value)}" placeholder="{H.escape(ph)}"></div>'
 
 
-def textarea(id_, ph, maxlength=140, value=""):
-    return (f'<div class="input"><textarea id="{id_}" maxlength="{maxlength}" placeholder="{H.escape(ph)}">{H.escape(value)}</textarea></div>'
-            f'<span class="counter">{len(value)} / {maxlength}</span>')
+def textarea(id_, ph, maxlength=140, value="", req=0):
+    """req : longueur minimale (champ obligatoire, compteur « Encore n caractères », bouton [data-guarded] bloqué d'ici là)."""
+    rq = f' data-req="{req}" aria-required="true"' if req else ""
+    count = f"Encore {req - len(value)} caractères" if req and len(value) < req else f"{len(value)} / {maxlength}"
+    return (f'<div class="input"><textarea id="{id_}" maxlength="{maxlength}" placeholder="{H.escape(ph)}"{rq}>{H.escape(value)}</textarea></div>'
+            f'<span class="counter">{count}</span>')
 
 
 # ------------------------------------------------------------------ tags
@@ -196,6 +204,23 @@ def tags_static(tags, limit=None):
     shown = tags if limit is None else tags[:limit]
     more = f'<span class="tag more" aria-label="{len(tags) - limit} autres tags">+{len(tags) - limit}</span>' if limit is not None and len(tags) > limit else ""
     return "".join(tag(x) for x in shown) + more
+
+
+# ------------------------------------------------------------------ description d'un trajet
+# Texte libre facultatif saisi dans Publier (DESC_MAX caractères) ; affiché dans le détail et le récapitulatif, jamais sur les cartes.
+DESC_MAX = 300
+
+def trip_desc(text, title, edit=False, out=False):
+    """Bloc « description » d'un trajet. Texte vide : rien, sauf pour l'organisateur (edit=True) : état vide + lien vers Publier.
+    out : le texte est la cible de recopie du champ #p-desc ([data-desc-out], popup #confirmer, app.js)."""
+    if not text:
+        if not edit:
+            return ""
+        return (f'<div class="trip-desc empty"><span class="label">{title}</span>'
+                '<span class="small">Pas encore de description. Quelques mots aident les autres à se décider.</span>'
+                f'<a class="linkbtn" href="publier.html">{i("edit","sm")}Ajouter une description</a></div>')
+    o = " data-desc-out" if out else ""
+    return f'<div class="trip-desc"><span class="label">{title}</span><p{o}>{H.escape(text)}</p></div>'
 
 
 def tagpick(id_, sel, mode=None, max_=None, flat=False):
@@ -254,15 +279,19 @@ def role_tag(role, mode="car"):
     return (f'<span class="role-tag d">{i("route")}Organisateur</span>' if role == "d"
             else f'<span class="role-tag p">{i("join")}Participant</span>')
 
-# Arrêts des trajets de démo Noisy-le-Grand → Copernic (celui de Léa, celui que conduit l'utilisateur).
+# Étapes des trajets de démo Noisy-le-Grand → Copernic (celui de Léa, celui que conduit l'utilisateur).
 LEA_STOPS = [("8 h 05", "Noisy-Champs · Gare RER A")]
-PUB_STOPS = [("8 h 02", "Noisy-Champs · Gare RER A")]  # arrêt prérempli dans Publier (et son aperçu)
+PUB_STOPS = [("8 h 02", "Noisy-Champs · Gare RER A")]  # étape préremplie dans Publier (et son aperçu)
 MY_STOPS = [("8 h 02", "Noisy-Champs · Gare RER A"), ("8 h 10", "Champs-sur-Marne · Nesles")]
-STOP_MAX = 2  # arrêts intermédiaires au plus sur un trajet, dans l'ordre du parcours
+# Descriptions de démo (trip_desc) ; PUB_DESC reste valable quel que soit le mode choisi dans Publier.
+PUB_DESC = "Je pars à l'heure pile et j'attends 5 min au plus au point de rendez-vous. Si tu as un imprévu, préviens-moi dans la messagerie."
+LEA_DESC = "Je fais ce trajet tous les matins avant mes cours. J'attends 5 min au plus au départ et à l'étape : préviens-moi dans la messagerie si tu as du retard."
+CHLOE_DESC = "On marche tranquillement jusqu'au campus, environ 25 min. Je pars de la gare à 7 h 55 pile : j'ai cours à 8 h 30, je ne peux pas attendre."
+STOP_MAX = 2  # étapes au plus sur un trajet, dans l'ordre du parcours
 
 def stop_lis(stops, extra=None):
-    """Arrêts intermédiaires [(heure estimée, zone), …] entre le départ et l'arrivée d'une .troute (extra : texte sous la zone)."""
-    return "".join(f'<li class="stop"><time>{t}</time><span class="dot"></span><span class="place"><small>Arrêt {k} · heure estimée</small><b>{H.escape(z)}</b>'
+    """Étapes [(heure estimée, zone), …] entre le départ et l'arrivée d'une .troute (extra : texte sous la zone)."""
+    return "".join(f'<li class="stop"><time>{t}</time><span class="dot"></span><span class="place"><small>Étape {k} · heure estimée</small><b>{H.escape(z)}</b>'
                    f'{extra[k - 1] if extra else ""}</span></li>' for k, (t, z) in enumerate(stops, 1))
 
 PAX_POOL = ["IN", "TK", "CL", "AS", "HP", "YB"]
@@ -280,25 +309,62 @@ def joined(pax):
     return (f'<span class="pax" aria-hidden="true">{av}</span>'
             f'<span class="badge joined">{i("users","sm")}{n} personne{"s" if n > 1 else ""} {"ont" if n > 1 else "a"} rejoint</span>')
 
+# Personnes de démo : le mini-profil (#m-profil) s'ouvre en cliquant sur leur nom ou leur ligne (person(), person_row()).
+PEOPLE = {  # initiales: (nom, formation, note, trajets, temps de réponse moyen (conducteurs, organisateurs), trajets ensemble)
+    "LM": ("Léa M.", "Master Génie civil", "4,9", "42 trajets conduits", "2 h", "9 trajets ensemble"),
+    "IN": ("Inès N.", "BUT GEA · 2e année", "4,8", "27 trajets", "", "6 trajets ensemble"),
+    "TK": ("Thomas K.", "École d'ingénieurs · 1re année", "4,5", "8 trajets", "", "2 trajets ensemble"),
+    "CL": ("Chloé L.", "Licence 3 Informatique", "4,7", "18 trajets", "1 h", "4 trajets ensemble"),
+    "AS": ("Amina S.", "Licence Informatique", "5,0", "22 trajets organisés", "", "3 trajets ensemble"),
+    "PR": ("Paul R.", "Master Urbanisme", "4,8", "15 trajets conduits", "1 h", "1 trajet ensemble"),
+    "HP": ("Hugo P.", "BUT MMI · 2e année", "4,6", "9 trajets", "", "2 trajets ensemble"),
+    "YB": ("Yanis B.", "École d'ingénieurs · 3e année", "4,7", "12 trajets conduits", "3 h", "Aucun trajet ensemble"),
+}
+LEA_REPLY, YANIS_REPLY, CHLOE_REPLY = PEOPLE["LM"][4], PEOPLE["YB"][4], PEOPLE["CL"][4]
+CHLOE_LEFT = "A quitté le trajet Noisy → Copernic le 23 sept."
+
+def person_data(ini, note=""):
+    """data-person lu par app.js : nom|initiales|couleur|formation|note|trajets|réponse|mention|ensemble."""
+    name, sub, rating, trips, reply, together = PEOPLE[ini]
+    return H.escape("|".join([name, ini, av_cls(ini), sub, rating, trips, reply, note, together]))
+
+def person(ini, label=None, note="", cls="who-link"):
+    """Nom cliquable : ouvre le mini-profil de la personne (d'où l'on peut la signaler)."""
+    return f'<button class="{cls}" type="button" data-open="profil" data-person="{person_data(ini, note)}">{label or PEOPLE[ini][0]}</button>'
+
+def person_row(ini, line, note="", bold=None):
+    """Ligne de liste cliquable (membres, passagers, participants) : ouvre le mini-profil."""
+    return (f'<button class="li click" type="button" data-open="profil" data-person="{person_data(ini, note)}" aria-label="Voir le profil de {PEOPLE[ini][0]}">'
+            f'<span class="avatar sm">{ini}</span><span class="grow"><b>{bold or PEOPLE[ini][0]}</b><span>{line}</span></span>{i("chevr","sm")}</button>')
+
 def trip(date, kind, dep_t, dep, arr_t, arr, price, free, total, pending, driver, rating, nr, tags=(),
-         href="trajet.html", status="", actions=None, go=True, role=None, pax=None, mode="car", cancel="", sent=False, stops=()):
+         href="trajet.html", actions=None, go=True, role=None, pax=None, mode="car", cancel="", sent=False, stops=(),
+         board="", reply=""):
+    """sent : bandeau d'état « Demande en attente » (orange ; la carte garde sa bordure normale) ; une place confirmée n'a pas de bandeau ;
+    board : point de montée du passager confirmé ; reply : temps de réponse moyen du conducteur ou de l'organisateur."""
     car = mode == "car"
     me = driver == "Toi"
     tags = [x for x in tags if mode in TAGS[x][2]]  # un tag hors de son mode n'a pas de sens (ex. Non-fumeur à vélo)
-    if not car:
-        role = None  # hors voiture : le mode (et sa couleur) suffit, pas d'étiquette Passager / Conducteur
     if me and href == "trajet.html":
         href = "mon-trajet.html"  # l'utilisateur conduit : vue conducteur (passagers, demandes)
     kind_b = f'<span class="badge reg">{i("repeat","sm")}Régulier · {kind}</span>' if kind != "Ponctuel" else '<span class="badge line">Ponctuel</span>'
-    if sent:
-        pend = f'<span class="badge line">{i("clock","sm")}Réponse attendue sous 18 h</span>'
+    if board:
+        pend = f'<span class="badge line">{i("pin","sm")}Tu montes à {H.escape(board)}</span>'
+    elif sent or (car and role == "p"):
+        pend = ""  # passager : les demandes des autres ne le concernent pas ; l'attente est dans le bandeau
+    elif pending and role != "p":  # tous les modes passent par une demande
+        pend = f'<span class="badge wait">{i("hourglass","sm")}{pending} demande{"s" if pending > 1 else ""} en attente</span>'
     elif not car:
         pend = '<span class="badge line">Sans limite de places</span>'
-    elif pending:
-        pend = f'<span class="badge wait">{i("hourglass","sm")}{pending} demande{"s" if pending > 1 else ""} en attente</span>'
     else:
         pend = '<span class="badge line">Aucune demande en attente</span>'
-    top = f'<div class="trip-top">{mode_tag(mode)}{role_tag(role, mode) if role else ""}<span class="date">{date}</span>{kind_b}{status}</div>'
+    if sent:
+        wait = f'<span>{driver.split()[0]} répond en moyenne en {reply}</span>' if reply else ""
+        state = f'<div class="trip-state wait">{i("hourglass","sm")}<b>Demande en attente</b>{wait}</div>'
+    else:
+        state = ""
+    # Le rôle est affiché pour tous les modes (Organisateur / Participant hors voiture).
+    top = f'{state}<div class="trip-top">{mode_tag(mode)}{role_tag(role, mode) if role else ""}<span class="date">{date}</span>{kind_b}</div>'
     route = (f'<ol class="troute"><li><time>{dep_t}</time><span class="dot"></span><span class="place"><small>Départ</small><b>{H.escape(dep)}</b></span></li>'
              + stop_lis(stops) +
              f'<li><time>{arr_t}</time><span class="dot"></span><span class="place"><small>Arrivée estimée</small><b>{H.escape(arr)}</b></span></li></ol>')
@@ -314,7 +380,8 @@ def trip(date, kind, dep_t, dep, arr_t, arr, price, free, total, pending, driver
     label = f'Voir le détail du trajet {H.escape(dep)} vers {H.escape(arr)}, {date}'
     go_el = (f'<a class="go" href="{href}" aria-label="{label}">Voir le détail{i("arrow","sm")}</a>' if actions is not None or cancel
              else f'<span class="go">Voir le détail{i("arrow","sm")}</span>') if go else ""
-    rc = f" role-{role}" if role else ""
+    # Filtres Conducteur / Passager de Mes trajets : classe role-d / role-p seulement en voiture
+    rc = f" role-{role}" if role and car else ""
     if actions is not None or cancel:
         # Mes trajets : l'action d'annulation à gauche, « Voir le détail » à droite (lien étiré sur toute la carte).
         acts = f'<div class="trip-actions">{cancel}{actions or ""}{go_el}</div>'
@@ -353,6 +420,16 @@ TABS = {
     "mod": [("moderation", "flag", "Signalements")],
     "admin": [("back-office", "chart", "Statistiques"), ("moderation", "flag", "Signalements")],
 }
+TAB_ALIAS = {"historique": "mes-trajets"}  # Historique n'a pas d'onglet : il se range sous Mes trajets (bascule trips_switch())
+ON_CUR = ' class="on" aria-current="page"'
+
+
+def trips_switch(cur):
+    """Mes trajets et Historique : deux onglets d'une même rubrique, pour trouver l'Historique en mobile
+    (la barre d'onglets n'a pas d'Historique). En ordinateur, il est dans la barre latérale : bascule masquée."""
+    tabs = [("mes-trajets", "ticket", "À venir"), ("historique", "history", "Historique")]
+    return ('<nav class="seg trips-switch hide-d" aria-label="Mes trajets">'
+            + "".join(f'<a href="{k}.html"{ON_CUR if k == cur else ""}>{i(ic, "sm")}{l}</a>' for k, ic, l in tabs) + '</nav>')
 
 
 def nav_html(role, act):
@@ -367,6 +444,7 @@ def nav_html(role, act):
 
 
 def tabbar_html(role, act):
+    act = TAB_ALIAS.get(act, act)
     out = []
     for k, ic, l in TABS[role]:
         cur = ' class="active" aria-current="page"' if k == act else ""
@@ -393,15 +471,16 @@ def app_page(key, title, body, roles=("user",), active=None, sub="", mtitle=None
         tabs += f'<nav class="tabbar" data-role-view="{r}" aria-label="Navigation mobile"{hid}>{tabbar_html(r, act)}</nav>'
     mleft = (f'<a class="iconbtn" href="{back}.html" aria-label="Retour">{i("back")}</a>' if back
              else '<img src="assets/logo-blanc.png" alt="U-Mobility">')
-    bell = f'<a class="iconbtn" href="messages.html" aria-label="Notifications, 2 non lues">{i("bell")}<span class="dot"></span></a>' if "user" in roles else ""
+    # Messages : icône de messagerie + nombre de non-lus (jaune = compteur), en haut à droite en mobile comme sur ordinateur
+    msgbtn = f'<a class="iconbtn msgbtn" href="messages.html" aria-label="Messages, 2 non lus" title="Messages">{i("msg")}<span class="count">2</span></a>' if "user" in roles else ""
     tr = f'<div class="tr">{topright}</div>' if topright else ""
     return f'''<div class="app" data-roles="{" ".join(roles)}">
 <aside class="sidebar">
 {views}
 </aside>
 <main class="main">
-<header class="mobilebar">{mleft}<b>{mtitle or title}</b>{bell}</header>
-<div class="topbar"><div class="grow"><h1>{title}</h1>{f'<p class="sub">{sub}</p>' if sub else ""}</div>{tr}{bell}</div>
+<header class="mobilebar">{mleft}<b>{mtitle or title}</b>{msgbtn}</header>
+<div class="topbar"><div class="grow"><h1>{title}</h1>{f'<p class="sub">{sub}</p>' if sub else ""}</div>{tr}{msgbtn}</div>
 <div class="content">
 {body}
 </div>
@@ -420,10 +499,11 @@ DEMOBAR = (f'<div class="demobar" role="toolbar" aria-label="Outils de la maquet
            f'<a class="btn sm light" href="plan.html" title="Toutes les pages de la maquette">{i("grid","sm")}<span>Toutes les pages</span></a></div>')
 
 
-def modal(id_, content, wide=False, drawer=False):
+def modal(id_, content, wide=False, drawer=False, cls="", attrs=""):
+    """cls / attrs : classes et attributs de la boîte (ex. Publier : mode-scope + data-show-mirror)."""
     if drawer:
         return f'<div class="drawer" id="m-{id_}" role="dialog" aria-modal="true"><div class="panel">{content}</div></div>'
-    return f'<div class="modal" id="m-{id_}" role="dialog" aria-modal="true"><div class="dialog{" wide" if wide else ""}">{content}</div></div>'
+    return f'<div class="modal" id="m-{id_}" role="dialog" aria-modal="true"><div class="dialog{" wide" if wide else ""}{" " + cls if cls else ""}"{attrs}>{content}</div></div>'
 
 
 def dhead(title, sub="", icon="info", red=False):
@@ -431,9 +511,11 @@ def dhead(title, sub="", icon="info", red=False):
             f'{f"<p class=muted>{sub}</p>" if sub else ""}</div><button class="iconbtn" type="button" data-close aria-label="Fermer">{i("x","sm")}</button></div>')
 
 
-def success(title, text, extra=""):
+def success(title, text, extra="", close=True):
+    """close=False : extra porte ses propres boutons (ex. « Voir mon trajet » à la place de « Fermer »)."""
+    cl = '<button class="btn" type="button" data-close>Fermer</button>' if close else ""
     return (f'<div class="success-state"><span class="ok">{i("check")}</span><h2>{title}</h2><p class="muted">{text}</p></div>'
-            f'<div class="dialog-foot">{extra}<button class="btn" type="button" data-close>Fermer</button></div>')
+            f'<div class="dialog-foot">{extra}{cl}</div>')
 
 
 # ------------------------------------------------------------------ heatmap data
@@ -601,9 +683,9 @@ PAGES["index"] = dict(title="Tableau de bord", mtitle="U-Mobility", app=None, mo
 <div class="split">
 <section class="stack">
 <div class="card-head"><h2>Mes prochains trajets</h2><a class="more" href="mes-trajets.html">Tout voir{i("chevr","sm")}</a></div>
-{trip("Demain · jeu. 25 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 1, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur", "Musique"), status='<span class="badge ok">' + i("check","sm") + 'Place confirmée</span>', role="p", pax=["MD", "IN"], href="trajet.html#membre", stops=LEA_STOPS)}
+{trip("Demain · jeu. 25 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 1, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur", "Musique"), board="Mont d'Est · 7 h 50", role="p", pax=["MD", "IN"], href="trajet.html#membre", stops=LEA_STOPS)}
 {trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Toi", "", None, ("Non-fumeur",), role="d", pax=["CL"], stops=MY_STOPS)}
-{trip("Ven. 26 sept.", "Ponctuel", "17 h 45", "Cité Descartes · Bienvenüe", "18 h 10", "Torcy · Centre", "3,00 €", 2, 3, 0, "Yanis B.", "4,7", 12, ("Bagages",), status='<span class="badge wait">' + i("clock","sm") + 'Demande envoyée</span>', role="p", pax=["HP"], sent=True)}
+{trip("Ven. 26 sept.", "Ponctuel", "17 h 45", "Cité Descartes · Bienvenüe", "18 h 10", "Torcy · Centre", "3,00 €", 2, 3, 0, "Yanis B.", "4,7", 12, ("Bagages",), role="p", pax=["HP"], sent=True, reply=YANIS_REPLY)}
 {trip("Lun. 29 sept.", "L J", "17 h 30", "Cité Descartes · Copernic", "17 h 50", "Noisy-Champs · Gare RER A", "", 0, 0, 0, "Amina S.", "5,0", 22, ("Calme",), role="p", pax=["AS", "MD", "PR", "CL", "HP"], mode="bike", href="trajet.html#velo")}
 </section>
 <aside class="stack-lg">
@@ -621,7 +703,7 @@ PAGES["index"] = dict(title="Tableau de bord", mtitle="U-Mobility", app=None, mo
 <p class="small muted">{tot_a} trajets sur les 3 derniers mois · plus longue série : {best_a} jours</p>
 </section>
 <section class="card">
-<div class="card-head"><h2>Mes modes ce mois-ci</h2><a class="more" href="profil.html">Modifier{i("chevr","sm")}</a></div>
+<div class="card-head"><h2>Mes modes ce mois-ci</h2><a class="more" href="historique.html">Historique{i("chevr","sm")}</a></div>
 <div class="stack">{hbars([("Voiture", 9, "car"), ("Vélo", 4, "bike"), ("À pied", 2, "walk"), ("Transports", 3, "transit")], " trajets", 9)}</div>
 <div class="notice">{i("leaf")}<span>Ta promo (BUT Info 2) a évité <b>1,2 t de CO₂</b> depuis la rentrée.</span></div>
 </section>
@@ -631,10 +713,16 @@ PAGES["index"] = dict(title="Tableau de bord", mtitle="U-Mobility", app=None, mo
 
 # ================================================================== RECHERCHE
 PREFS = ["Non-fumeur", "Musique", "À l'heure"]  # préférences du profil, précochées dans la recherche
+CUR = ' aria-current="page"'
+# Pagination des résultats (maquette : 4 pages, seul l'état actif change)
+PAGER = ('<nav class="pager" aria-label="Pages de résultats" data-pages="4">'
+         f'<button type="button" class="pg-step" data-page="prev" aria-label="Page précédente" disabled>{i("back", "sm")}<span class="hide-m">Précédent</span></button>'
+         + "".join(f'<button type="button" class="pg-n{" on" if n == 1 else ""}" data-page="{n}" aria-label="Page {n}"{CUR if n == 1 else ""}>{n}</button>' for n in range(1, 5))
+         + f'<button type="button" class="pg-step" data-page="next" aria-label="Page suivante"><span class="hide-m">Suivant</span>{i("chevr", "sm")}</button></nav>')
 PAGES["recherche"] = dict(title="Rechercher un trajet", mtitle="Rechercher", modals="", body=f'''
 <section class="card">
-<div class="between"><div class="seg" data-single><button type="button" class="on">Ponctuel</button><button type="button">Régulier</button></div>
-<span class="small muted campus-line">{i("campus","sm")}Campus <b data-campus-name>{CAMPUS}</b> · <a href="profil.html">changer</a></span></div>
+<div class="between search-top"><div class="seg" data-single><button type="button" class="on">Ponctuel</button><button type="button">Régulier</button></div>
+<span class="small muted campus-line hide-m">{i("campus","sm")}Campus <b data-campus-name>{CAMPUS}</b> · <a href="profil.html">changer</a></span></div>
 <div class="field"><span class="label">Modes de déplacement</span><div class="row modechips">{"".join(f'<button class="chip mchip m-{m} on" data-toggle type="button" aria-pressed="true">{i(ic,"sm")}{lbl}</button>' for m, (lbl, ic) in MODES.items())}</div></div>
 <div class="searchgrid">
 <div class="field"><span class="label">Départ</span>{select("s-dep", "Noisy-le-Grand · Mont d'Est")}</div>
@@ -643,33 +731,72 @@ PAGES["recherche"] = dict(title="Rechercher un trajet", mtitle="Rechercher", mod
 <div class="field"><label for="s-date">Date</label>{inp("s-date", "Ven. 26 sept.", "", "calendar")}</div>
 <div class="field"><label for="s-time">Arriver avant</label>{inp("s-time", "8 h 30", "", "clock")}</div>
 </div>
-<div class="between"><p class="small muted">{i("info","sm")} Les zones de départ et d'arrivée sont définies par l'université.</p><button class="btn" type="button" data-loadtoast="6 trajets compatibles trouvés">{i("search","sm")}Rechercher</button></div>
+<div class="between"><p class="small muted">{i("info","sm")} Les zones de départ et d'arrivée sont définies par l'université.</p>
+<div class="row"><span class="label" id="s-seats-l">Places minimum <span class="muted" style="font-weight:400">(voiture)</span></span><div class="stepper" data-max="3" role="group" aria-labelledby="s-seats-l"><button class="iconbtn" type="button" aria-label="Moins">−</button><b>1</b><button class="iconbtn" type="button" aria-label="Plus">+</button></div>
+<button class="btn" type="button" data-loadtoast="24 trajets compatibles trouvés">{i("search","sm")}Rechercher</button></div></div>
 </section>
 <div class="split-left">
-<aside class="card">
-<div class="card-head"><h2>Filtres</h2><button class="linkbtn" type="button" data-toast="Filtres réinitialisés">Réinitialiser</button></div>
-<div class="field"><span class="label">Heure d'arrivée</span><div class="row" style="gap:6px"><button class="chip" data-radio type="button">7 h – 8 h</button><button class="chip on" data-radio type="button">8 h – 9 h</button><button class="chip" data-radio type="button">9 h – 10 h</button></div></div>
-<div class="field"><span class="label">Places minimum <span class="muted" style="font-weight:400">(voiture)</span></span><div class="stepper" data-max="3"><button class="iconbtn" type="button" aria-label="Moins">−</button><b>1</b><button class="iconbtn" type="button" aria-label="Plus">+</button></div></div>
-<div class="divider"></div>
+<aside class="card collapsible">
+<div class="card-head"><h2>Filtres</h2><div class="row" style="gap:8px"><button class="linkbtn" type="button" data-toast="Filtres réinitialisés">Réinitialiser</button><button class="iconbtn hide-d" type="button" data-collapse aria-expanded="false" aria-controls="s-filters" aria-label="Afficher les filtres">{i("chev","sm")}</button></div></div>
+<div class="collapse-body" id="s-filters">
 <div class="field">{tp_head("Tags", PREFS, clear=True)}{tagpick("s-tags", PREFS, flat=True)}
 <span class="hint">Tes préférences du profil sont précochées.</span></div>
 <div class="divider"></div>
 <div class="optline"><span>Conducteurs notés 4 ★ et plus</span><button class="toggle on" type="button" aria-pressed="true" aria-label="Conducteurs notés 4 et plus"></button></div>
 <div class="optline"><span>Compatible avec mes horaires types</span><button class="toggle on" type="button" aria-pressed="true" aria-label="Horaires types"></button></div>
 <div class="optline"><span>Même composante</span><button class="toggle" type="button" aria-pressed="false" aria-label="Même composante"></button></div>
+</div>
 </aside>
 <section class="stack">
-<div class="between"><p><b>6 trajets</b> <span class="muted">· triés par heure d'arrivée</span></p>
+<div class="between"><p><b>24 trajets</b> <span class="muted">· page <span data-page-cur>1</span> sur 4 · triés par heure d'arrivée</span></p>
 <div class="select" id="s-sort" style="min-width:200px"><button type="button">{i("filter","sm")}<span>Heure d'arrivée</span>{i("chev","sm chev")}</button><div class="options"><button type="button" class="opt sel">Heure d'arrivée</button><button type="button" class="opt">Prix</button><button type="button" class="opt">Note du conducteur</button><button type="button" class="opt">Places libres</button></div></div></div>
 {trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur", "Musique"), stops=LEA_STOPS)}
 {trip("Ven. 26 sept.", "Ponctuel", "8 h 00", "Noisy-Champs · Gare RER A", "8 h 15", "Cité Descartes · Bienvenüe", "1,50 €", 3, 4, 0, "Hugo P.", "4,6", 9, ("Discussion",))}
 {trip("Ven. 26 sept.", "L M V", "7 h 55", "Noisy-le-Grand · Mont d'Est", "8 h 25", "Cité Descartes · Lavoisier", "2,50 €", 1, 3, 1, "Amina S.", "5,0", 22, ("Calme", "Non-fumeur", "Bagages", "À l'heure"))}
 {trip("Ven. 26 sept.", "Ponctuel", "8 h 10", "Champs-sur-Marne · Nesles", "8 h 25", "Cité Descartes · Copernic", "1,00 €", 2, 2, 0, "Paul R.", "4,8", 15, ("Bagages",))}
-{trip("Ven. 26 sept.", "L M M J V", "7 h 55", "Noisy-Champs · Gare RER A", "8 h 20", "Cité Descartes · Copernic", "", 0, 0, 0, "Chloé L.", "4,9", 17, ("Discussion",), pax=["CL", "IN", "TK"], mode="walk")}
+{trip("Ven. 26 sept.", "L M M J V", "7 h 55", "Noisy-Champs · Gare RER A", "8 h 20", "Cité Descartes · Copernic", "", 0, 0, 1, "Chloé L.", "4,7", 18, ("Discussion",), role="p", pax=["CL", "IN", "TK"], mode="walk", href="trajet.html#pied", sent=True, reply=CHLOE_REPLY)}
 {trip("Ven. 26 sept.", "Ponctuel", "7 h 40", "Torcy · Centre", "8 h 25", "Cité Descartes · Bienvenüe", "", 0, 0, 0, "Thomas K.", "4,5", 8, ("Calme",), pax=["TK", "YB", "HP", "AS", "PR", "LM"], mode="transit")}
+{PAGER}
 </section>
 </div>
 ''')
+
+# ================================================================== SIGNALEMENTS (popups partagées)
+# Facile à trouver (mini-profil de chaque personne, anciens membres compris), réfléchi à envoyer : faits obligatoires,
+# preuves facultatives (images, messages de la conversation), engagement ; envoi bloqué d'ici là ([data-guard], app.js).
+TRIP_MOTIFS = ["Trajet non conforme", "Tarif abusif", "Annonce commerciale", "Informations fausses", "Autre"]
+ACCOUNT_MOTIFS = ["Comportement inapproprié", "Absence au rendez-vous", "Conduite dangereuse", "Harcèlement", "Faux profil", "Autre"]
+UP_MAX = 5  # images au plus par signalement
+
+def motifs(items, on=0):
+    return '<div class="row" style="gap:6px">' + "".join(f'<button class="chip{" on" if k == on else ""}" data-radio type="button">{m}</button>' for k, m in enumerate(items)) + '</div>'
+
+def up_thumb(name, tone, ro=False):
+    """Vignette d'image jointe (maquette : aplat teinté + icône) ; ro : lecture seule (dossier de modération)."""
+    dl = "" if ro else f'<button class="up-del" type="button" data-upload="del" aria-label="Retirer {name}" title="Retirer">{i("x","sm")}</button>'
+    return f'<li class="up {tone}"><span class="up-img" role="img" aria-label="Image {name}">{i("image")}</span><span class="up-name">{name}</span>{dl}</li>'
+
+def uploads(id_, demo=(("capture-1.jpg", "t1"), ("capture-2.jpg", "t2"))):
+    """Images d'un signalement (UP_MAX au plus) : vignettes + tuile « Ajouter » ; data-upload="add|del" (app.js)."""
+    return (f'<div class="field up-field" data-max="{UP_MAX}"><div class="tp-head"><span class="label">Images <span class="muted" style="font-weight:400">(facultatif)</span></span><span class="tp-count"><b>{len(demo)}</b> / {UP_MAX}</span></div>'
+            f'<ul class="uploads" id="{id_}">{"".join(up_thumb(n, t) for n, t in demo)}'
+            f'<li class="up-add-li"><button class="up-add" type="button" data-upload="add">{i("image")}<span>Ajouter</span></button></li></ul>'
+            f'<template class="up-tpl">{up_thumb("capture.jpg", "t1")}</template>'
+            f'<span class="hint">Captures d\'écran ou photos, JPG ou PNG, 5 Mo max chacune. Leurs métadonnées (dont la position) sont retirées à l\'envoi. Seule l\'équipe de modération les voit.</span></div>')
+
+def report_details(id_):
+    return (f'<div class="field"><label for="{id_}">Que s\'est-il passé ?</label>{textarea(id_, "Décris les faits : quand, à quel moment du trajet, ce qui a été dit ou fait.", 500, req=30)}'
+            f'<span class="hint">Obligatoire : des faits précis permettent à la modération de trancher.</span></div>')
+
+def report_end():
+    """Fin commune des popups de signalement : engagement, rappel du 112, envoi bloqué tant que le formulaire est incomplet."""
+    return ('<label class="checkline"><input type="checkbox" data-req><span>Je certifie que ces informations sont exactes. '
+            'Un signalement abusif peut entraîner un avertissement.</span></label>'
+            f'<div class="notice warn">{i("info")}<span>En cas d\'urgence, appelle le 112. Ce formulaire ne remplace pas les secours.</span></div>'
+            f'<div class="dialog-foot"><button class="btn ghost" type="button" data-close>Annuler</button>'
+            f'<button class="btn danger-solid" type="button" disabled data-guarded data-next data-loading>{i("flag","sm")}Envoyer le signalement</button></div>')
+
+REPORT_SENT = success("Signalement envoyé", "L'équipe de modération l'examine sous 48 h. La personne signalée ne sait pas qui l'a signalée.")
 
 # ================================================================== DÉTAIL DU TRAJET
 dist = [("5 ★", 31), ("4 ★", 6), ("3 ★", 1), ("2 ★", 0), ("1 ★", 0)]
@@ -678,6 +805,7 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <div class="crumb" data-view="public" data-mode="car" data-mtitle="Trajet de Léa"><a href="recherche.html">Rechercher</a>{i("chevr","sm")}<span>Trajet de Léa · ven. 26 sept.</span></div>
 <div class="crumb" data-view="membre" data-back="mes-trajets" data-mode="car" data-mtitle="Trajet de Léa" hidden><a href="mes-trajets.html">Mes trajets</a>{i("chevr","sm")}<span>Trajet de Léa · ta place confirmée</span></div>
 <div class="crumb" data-view="velo" data-back="mes-trajets" data-mode="bike" data-mtitle="Trajet à vélo" hidden><a href="mes-trajets.html">Mes trajets</a>{i("chevr","sm")}<span>Trajet à vélo d'Amina · lun. 29 sept.</span></div>
+<div class="crumb" data-view="pied" data-mode="walk" data-mtitle="Trajet de Chloé" hidden><a href="recherche.html">Rechercher</a>{i("chevr","sm")}<span>Trajet à pied de Chloé · ven. 26 sept.</span></div>
 <div class="split mode-scope m-car" data-mode-default="car">
 <div class="stack-lg">
 <section class="card" data-view="public">
@@ -699,16 +827,18 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <span class="pin" style="right:24px;top:24px"><i style="background:var(--secondary)"></i>Copernic</span>
 </div>
 <div class="stack" style="gap:8px"><div class="between"><span class="label">Passagers</span><span class="badge seats">2 places restantes</span></div>
-<div class="row" style="gap:16px"><span class="row" style="gap:8px"><span class="avatar sm">IN</span><span><b>Inès N.</b> {stars("4,8")}</span></span><span class="row" style="gap:8px"><span class="seat-free lg" aria-hidden="true"></span><span class="muted">Place libre</span></span><span class="row" style="gap:8px"><span class="seat-free lg" aria-hidden="true"></span><span class="muted">Place libre</span></span></div></div>
+<div class="row" style="gap:16px"><span class="row" style="gap:8px"><span class="avatar sm">IN</span><span><b>{person("IN")}</b> {stars("4,8")}</span></span><span class="row" style="gap:8px"><span class="seat-free lg" aria-hidden="true"></span><span class="muted">Place libre</span></span><span class="row" style="gap:8px"><span class="seat-free lg" aria-hidden="true"></span><span class="muted">Place libre</span></span></div></div>
 <div class="grid-auto">
 <div class="stack" style="gap:2px"><span class="small muted">Demandes en attente</span><b>2</b></div>
 <div class="stack" style="gap:2px"><span class="small muted">Véhicule</span><b>Clio grise</b></div>
 <div class="stack" style="gap:2px"><span class="small muted">CO₂ évité / passager</span><b>1,4 kg</b></div>
 </div>
+{trip_desc(LEA_DESC, "Le mot de Léa")}
 <div class="row" style="gap:6px">{tags_static(["Non-fumeur", "Musique", "Bagages"])}</div>
 </section>
 <section class="card" data-view="membre" hidden>
-<div class="between" style="align-items:flex-start"><div class="stack" style="gap:6px;justify-items:start"><div class="row" style="gap:6px">{role_tag("p")}{mode_tag("car")}<span class="badge ok">{i("check","sm")}Place confirmée</span><span class="badge reg">{i("repeat","sm")}Trajet régulier</span></div><h2>Chaque lundi, mardi, jeudi et vendredi</h2></div>
+<div class="trip-state ok">{i("check","sm")}<b>Place confirmée</b><span>Tu montes à Mont d'Est · 7 h 50, les lundis, jeudis et vendredis</span></div>
+<div class="between" style="align-items:flex-start"><div class="stack" style="gap:6px;justify-items:start"><div class="row" style="gap:6px">{role_tag("p")}{mode_tag("car")}<span class="badge reg">{i("repeat","sm")}Trajet régulier</span></div><h2>Chaque lundi, mardi, jeudi et vendredi</h2></div>
 <div class="stack price-box" style="gap:2px"><span class="price" style="font-size:26px;line-height:30px">2,50 € <small>/ trajet</small></span></div></div>
 <div class="recur">
 <div class="stack" style="gap:6px"><span class="small muted">Tes jours</span>{days([0, 3, 4], pick=False, mini=True)}<span class="small muted">Léa conduit L M J V</span></div>
@@ -727,16 +857,17 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <span class="pin" style="right:24px;top:24px"><i style="background:var(--secondary)"></i>Copernic</span>
 </div>
 <div class="stack" style="gap:8px"><div class="between"><span class="label">Passagers</span><span class="badge seats">1 place restante</span></div>
-<div class="row" style="gap:16px"><span class="row" style="gap:8px"><span class="avatar sm">MD</span><span><b>Toi</b> <span class="small muted">· L J V</span></span></span><span class="row" style="gap:8px"><span class="avatar sm">IN</span><span><b>Inès N.</b> {stars("4,8")} <span class="small muted">· J V</span></span></span><span class="row" style="gap:8px"><span class="seat-free lg" aria-hidden="true"></span><span class="muted">Place libre</span></span></div></div>
+<div class="row" style="gap:16px"><span class="row" style="gap:8px"><span class="avatar sm">MD</span><span><b>Toi</b> <span class="small muted">· L J V</span></span></span><span class="row" style="gap:8px"><span class="avatar sm">IN</span><span><b>{person("IN")}</b> {stars("4,8")} <span class="small muted">· J V</span></span></span><span class="row" style="gap:8px"><span class="seat-free lg" aria-hidden="true"></span><span class="muted">Place libre</span></span></div></div>
 <div class="grid-auto">
 <div class="stack" style="gap:2px"><span class="small muted">Ta réservation</span><b>1 place</b></div>
 <div class="stack" style="gap:2px"><span class="small muted">Véhicule</span><b>Clio grise</b></div>
 <div class="stack" style="gap:2px"><span class="small muted">CO₂ évité / trajet</span><b>1,4 kg</b></div>
 </div>
+{trip_desc(LEA_DESC, "Le mot de Léa")}
 <div class="row" style="gap:6px">{tags_static(["Non-fumeur", "Musique", "Bagages"])}</div>
 </section>
 <section class="card" data-view="velo" hidden>
-<div class="between" style="align-items:flex-start"><div class="stack" style="gap:6px;justify-items:start"><div class="row" style="gap:6px">{mode_tag("bike")}<span class="badge reg">{i("repeat","sm")}Régulier · L J</span></div><h2>Chaque lundi et jeudi</h2></div><span class="free-tag" style="font-size:22px;line-height:28px">Gratuit</span></div>
+<div class="between" style="align-items:flex-start"><div class="stack" style="gap:6px;justify-items:start"><div class="row" style="gap:6px">{role_tag("p", "bike")}{mode_tag("bike")}<span class="badge reg">{i("repeat","sm")}Régulier · L J</span></div><h2>Chaque lundi et jeudi</h2></div><span class="free-tag" style="font-size:22px;line-height:28px">Gratuit</span></div>
 <div class="recur">
 <div class="stack" style="gap:6px"><span class="small muted">Jours</span>{days([0, 3], pick=False, mini=True)}</div>
 <div class="stack" style="gap:2px"><span class="small muted">Période</span><b>Du 29 sept. au 18 déc. 2026</b><span class="small muted">hors vacances universitaires</span></div>
@@ -747,14 +878,36 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <li><time>17 h 50</time><span class="dot"></span><span class="place"><small>Arrivée estimée</small><b>Noisy-Champs · Gare RER A</b><span class="small muted">Arceaux vélos côté gare routière</span></span></li>
 </ol>
 <div class="stack" style="gap:8px"><div class="between"><span class="label">Participants</span><span class="badge joined">{i("users","sm")}5 personnes ont rejoint</span></div>
-<div class="row" style="gap:16px"><span class="row" style="gap:8px"><span class="avatar sm">AS</span><span><b>Amina S.</b> <span class="small muted">· organise</span></span></span><span class="row" style="gap:8px"><span class="avatar sm">MD</span><b>Toi</b></span><span class="row" style="gap:8px"><span class="avatar sm">PR</span><b>Paul R.</b></span><span class="row" style="gap:8px"><span class="avatar sm">CL</span><b>Chloé L.</b></span><span class="row" style="gap:8px"><span class="avatar sm">HP</span><b>Hugo P.</b></span></div></div>
+<div class="row" style="gap:16px"><span class="row" style="gap:8px"><span class="avatar sm">AS</span><span><b>{person("AS")}</b> <span class="small muted">· organise</span></span></span><span class="row" style="gap:8px"><span class="avatar sm">MD</span><b>Toi</b></span><span class="row" style="gap:8px"><span class="avatar sm">PR</span><b>{person("PR")}</b></span><span class="row" style="gap:8px"><span class="avatar sm">CL</span><b>{person("CL")}</b></span><span class="row" style="gap:8px"><span class="avatar sm">HP</span><b>{person("HP")}</b></span></div></div>
 <div class="grid-auto">
 <div class="stack" style="gap:2px"><span class="small muted">Distance</span><b>4 km</b></div>
 <div class="stack" style="gap:2px"><span class="small muted">Durée</span><b>20 min</b></div>
 <div class="stack" style="gap:2px"><span class="small muted">CO₂ évité / trajet</span><b>0,9 kg</b></div>
 </div>
-<div class="notice">{i("users")}<span>Sans voiture : pas de prix ni de limite de places. Chacun peut rejoindre ou quitter le trajet librement.</span></div>
+<div class="notice">{i("users")}<span>Sans voiture : pas de prix ni de limite de places. Amina a accepté ta demande ; tu peux quitter le trajet à tout moment.</span></div>
 <div class="row" style="gap:6px">{tags_static(["Calme"])}</div>
+</section>
+<section class="card" data-view="pied" hidden>
+<div class="between" style="align-items:flex-start"><div class="stack" style="gap:6px;justify-items:start"><div class="row" style="gap:6px">{mode_tag("walk")}<span class="badge reg">{i("repeat","sm")}Trajet régulier</span></div><h2>Du lundi au vendredi</h2></div><span class="free-tag" style="font-size:22px;line-height:28px">Gratuit</span></div>
+<div class="recur">
+<div class="stack" style="gap:6px"><span class="small muted">Jours</span>{days([0, 1, 2, 3, 4], pick=False, mini=True)}</div>
+<div class="stack" style="gap:2px"><span class="small muted">Période</span><b>Du 22 sept. au 19 déc. 2026</b><span class="small muted">hors vacances universitaires</span></div>
+<div class="stack" style="gap:2px"><span class="small muted">Prochain départ</span><b>Ven. 26 sept. · 7 h 55</b></div>
+</div>
+<ol class="troute" style="gap:22px">
+<li><time>7 h 55</time><span class="dot"></span><span class="place"><small>Départ</small><b>Noisy-Champs · Gare RER A</b><span class="small muted">Point de rendez-vous exact partagé dans la messagerie du trajet après acceptation</span></span></li>
+<li><time>8 h 20</time><span class="dot"></span><span class="place"><small>Arrivée estimée</small><b>Cité Descartes · Copernic</b><span class="small muted">Entrée principale</span></span></li>
+</ol>
+<div class="stack" style="gap:8px"><div class="between"><span class="label">Participants</span><span class="badge joined">{i("users","sm")}3 personnes ont rejoint</span></div>
+<div class="row" style="gap:16px"><span class="row" style="gap:8px"><span class="avatar sm">CL</span><span><b>{person("CL")}</b> <span class="small muted">· organise</span></span></span><span class="row" style="gap:8px"><span class="avatar sm">IN</span><b>{person("IN")}</b></span><span class="row" style="gap:8px"><span class="avatar sm">TK</span><b>{person("TK")}</b></span></div></div>
+<div class="grid-auto">
+<div class="stack" style="gap:2px"><span class="small muted">Distance</span><b>1,8 km</b></div>
+<div class="stack" style="gap:2px"><span class="small muted">Durée</span><b>25 min</b></div>
+<div class="stack" style="gap:2px"><span class="small muted">Demandes en attente</span><b>1</b></div>
+</div>
+<div class="notice">{i("users")}<span>Sans voiture : pas de prix ni de limite de places. Chloé accepte chaque demande ; tu rejoins la messagerie du trajet une fois acceptée.</span></div>
+{trip_desc(CHLOE_DESC, "Le mot de Chloé")}
+<div class="row" style="gap:6px">{tags_static(["Discussion"])}</div>
 </section>
 <section class="card" data-view="public membre">
 <div class="card-head"><h2>Notes reçues par Léa</h2>{stars("4,9", "38 notes")}</div>
@@ -764,28 +917,40 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <aside class="stack-lg">
 <div class="stack-lg" data-view="public">
 <section class="card">
-<div class="row"><span class="avatar lg b">LM</span><div><h2>Léa M.</h2><p class="muted">Master Génie civil · conductrice</p><p>{stars("4,9", 38)}</p></div></div>
-<div class="row" style="gap:6px"><span class="badge ok">{i("shield","sm")}Compte universitaire vérifié</span><span class="badge line">42 trajets conduits</span></div>
+<div class="row"><span class="avatar lg b">LM</span><div><h2>{person("LM")}</h2><p class="muted">Master Génie civil · conductrice</p><p>{stars("4,9", 38)}</p></div></div>
+<div class="row" style="gap:6px"><span class="badge ok">{i("shield","sm")}Compte universitaire vérifié</span><span class="badge line">42 trajets conduits</span><span class="badge line">{i("clock","sm")}Répond en moyenne en {LEA_REPLY}</span></div>
 <div class="recap">
 <div class="between"><b>Prix par trajet</b><b class="num">2,50 €</b></div>
 </div>
 <button class="btn secondary block" type="button" data-open="demande">{i("join","sm")}Demander à rejoindre ce trajet</button>
-<p class="small muted">Léa a 24 h pour accepter ou refuser. Tu rejoindras ensuite la messagerie du trajet.</p>
+<p class="small muted">Léa répond en moyenne en {LEA_REPLY}. Tu rejoindras ensuite la messagerie du trajet.</p>
 </section>
 <button class="btn danger block" type="button" data-open="signaler">{i("flag","sm")}Signaler ce trajet</button>
 </div>
 <div class="stack-lg" data-view="velo" hidden>
 <section class="card">
-<div class="row"><span class="avatar lg">AS</span><div><h2>Amina S.</h2><p class="muted">Licence Informatique · organisatrice</p><p>{stars("5,0", 22)}</p></div></div>
+<div class="row"><span class="avatar lg">AS</span><div><h2>{person("AS")}</h2><p class="muted">Licence Informatique · organisatrice</p><p>{stars("5,0", 22)}</p></div></div>
 <div class="row" style="gap:6px"><span class="badge ok">{i("shield","sm")}Compte universitaire vérifié</span></div>
 <a class="btn block" href="messages.html">{i("msg","sm")}Messagerie du trajet</a>
 <button class="btn danger block" type="button" data-toast="Tu as quitté le trajet à vélo">{i("leave","sm")}Quitter ce trajet</button>
 </section>
 <button class="btn danger block" type="button" data-open="signaler">{i("flag","sm")}Signaler ce trajet</button>
 </div>
+<div class="stack-lg" data-view="pied" hidden>
+<section class="card">
+<div class="row"><span class="avatar lg">CL</span><div><h2>{person("CL")}</h2><p class="muted">Licence 3 Informatique · organisatrice</p><p>{stars("4,7", 18)}</p></div></div>
+<div class="row" style="gap:6px"><span class="badge ok">{i("shield","sm")}Compte universitaire vérifié</span><span class="badge line">18 trajets</span><span class="badge line">{i("clock","sm")}Répond en moyenne en {CHLOE_REPLY}</span></div>
+<div class="recap">
+<div class="between"><b>Prix</b><b>Gratuit</b></div>
+</div>
+<button class="btn secondary block" type="button" data-open="demande-pied">{i("join","sm")}Demander à rejoindre ce trajet</button>
+<p class="small muted">Chloé répond en moyenne en {CHLOE_REPLY}. Tu rejoindras ensuite la messagerie du trajet.</p>
+</section>
+<button class="btn danger block" type="button" data-open="signaler">{i("flag","sm")}Signaler ce trajet</button>
+</div>
 <div class="stack-lg" data-view="membre" hidden>
 <section class="card">
-<div class="row"><span class="avatar lg b">LM</span><div><h2>Léa M.</h2><p class="muted">Master Génie civil · ta conductrice</p><p>{stars("4,9", 38)}</p></div></div>
+<div class="row"><span class="avatar lg b">LM</span><div><h2>{person("LM")}</h2><p class="muted">Master Génie civil · ta conductrice</p><p>{stars("4,9", 38)}</p></div></div>
 <div class="row" style="gap:6px"><span class="badge ok">{i("shield","sm")}Compte universitaire vérifié</span><span class="badge line">42 trajets conduits</span></div>
 <a class="btn block" href="messages.html">{i("msg","sm")}Messagerie du trajet</a>
 <button class="btn danger block" type="button" data-open="annuler">{i("x","sm")}Annuler ma place</button>
@@ -799,7 +964,7 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <div data-step>
 {dhead("Demander à rejoindre", "Trajet de Léa · départ 7 h 50 · Noisy-le-Grand → Copernic", "join")}
 <div class="field"><span class="label">Jours souhaités</span>{days([3, 4], allowed=[0, 1, 3, 4])}<span class="hint">Trajet régulier : choisis parmi les jours proposés par Léa (lundi, mardi, jeudi, vendredi).</span></div>
-<div class="field"><span class="label">Où montes-tu ?</span><div class="seg board" data-single><button type="button" class="on" data-label="Mont d'Est · 7 h 50"><b>7 h 50</b> Mont d'Est · départ</button>{"".join(f'<button type="button" data-label="{z.split(" · ")[0]} · {t}"><b>{t}</b> {z.split(" · ")[0]} · arrêt {k}</button>' for k, (t, z) in enumerate(LEA_STOPS, 1))}</div><span class="hint">Le départ ou l'un des arrêts prévus par Léa, dans l'ordre du parcours.</span></div>
+<div class="field"><span class="label">Où montes-tu ?</span><div class="seg board" data-single><button type="button" class="on" data-label="Mont d'Est · 7 h 50"><b>7 h 50</b> Mont d'Est · départ</button>{"".join(f'<button type="button" data-label="{z.split(" · ")[0]} · {t}"><b>{t}</b> {z.split(" · ")[0]} · étape {k}</button>' for k, (t, z) in enumerate(LEA_STOPS, 1))}</div><span class="hint">Le départ ou l'une des étapes prévues par Léa, dans l'ordre du parcours.</span></div>
 <div class="field"><span class="label">Places</span><div class="stepper" data-max="2"><button class="iconbtn" type="button" aria-label="Moins">−</button><b>1</b><button class="iconbtn" type="button" aria-label="Plus">+</button></div></div>
 <div class="field"><label for="d-msg">Message à Léa <span class="muted" style="font-weight:400">(facultatif)</span></label>{textarea("d-msg", "Ex. : je peux être au point de rendez-vous 5 min avant.")}</div>
 <div class="recap"><div class="between small"><span class="muted">Période</span><b>du 26 sept. au 19 déc.</b></div>
@@ -807,56 +972,113 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <div class="between small"><b>Prix par trajet</b><b class="num">2,50 €</b></div></div>
 <div class="dialog-foot"><button class="btn ghost" type="button" data-close>Annuler</button><button class="btn secondary" type="button" data-next data-loading>{i("send","sm")}Envoyer la demande</button></div>
 </div>
-<div data-step hidden>{success("Demande envoyée", "Léa a 24 h pour répondre. Tu seras notifié dès qu'elle accepte ou refuse.", '<a class="btn ghost" href="mes-trajets.html#envoyees">Voir mes demandes</a>')}</div>
-''') + modal("signaler", f'''
+<div data-step hidden>{success("Demande envoyée", f"Léa répond en moyenne en <b>{LEA_REPLY}</b>. Tu seras prévenu dès qu'elle accepte ou refuse. Tu peux retirer ta demande à tout moment depuis Mes trajets.", '<a class="btn ghost" href="mes-trajets.html">Voir mes trajets</a>')}</div>
+''') + modal("demande-pied", f'''
 <div data-step>
+{dhead("Demander à rejoindre", "Trajet de Chloé · départ 7 h 55 · Noisy-Champs → Copernic", "join")}
+<div class="field"><span class="label">Jours souhaités</span>{days([2], allowed=[0, 1, 2, 3, 4])}<span class="hint">Trajet régulier : choisis parmi les jours proposés par Chloé (du lundi au vendredi).</span></div>
+<div class="field"><label for="dp-msg">Message à Chloé <span class="muted" style="font-weight:400">(facultatif)</span></label>{textarea("dp-msg", "Ex. : je serai à la sortie 2 de la gare vers 7 h 50.")}</div>
+<div class="recap"><div class="between small"><span class="muted">Période</span><b>du 22 sept. au 19 déc.</b></div>
+<div class="between small"><span class="muted">Départ</span><b>Noisy-Champs · 7 h 55</b></div>
+<div class="between small"><b>Prix</b><b>Gratuit, sans limite de places</b></div></div>
+<div class="dialog-foot"><button class="btn ghost" type="button" data-close>Annuler</button><button class="btn secondary" type="button" data-next data-loading>{i("send","sm")}Envoyer la demande</button></div>
+</div>
+<div data-step hidden>{success("Demande envoyée", f"Chloé répond en moyenne en <b>{CHLOE_REPLY}</b>. Tu seras prévenu dès qu'elle accepte ou refuse. Tu peux retirer ta demande à tout moment depuis Mes trajets.", '<a class="btn ghost" href="mes-trajets.html">Voir mes trajets</a>')}</div>
+''', cls="mode-scope m-walk", attrs=' data-in-view="pied"') + modal("signaler", f'''
+<div data-step data-guard>
 {dhead("Signaler", "Ton signalement est transmis uniquement à l'équipe de modération.", "flag", True)}
 <div class="seg" data-single><button type="button" class="on" data-show="trajet">Ce trajet</button><button type="button" data-show="compte">Le compte de Léa</button></div>
-<div class="field"><span class="label">Motif</span><div class="row" style="gap:6px">{"".join(f'<button class="chip{" on" if k == 0 else ""}" data-radio type="button">{m}</button>' for k, m in enumerate(["Trajet non conforme", "Tarif abusif", "Annonce commerciale", "Informations fausses", "Autre"]))}</div></div>
-<div class="field"><label for="r-msg">Détails <span class="muted" style="font-weight:400">(facultatif)</span></label>{textarea("r-msg", "Décris ce qui pose problème.", 500)}</div>
-<div class="notice warn">{i("info")}<span>En cas d'urgence, appelle le 112. Ce formulaire ne remplace pas les secours.</span></div>
-<div class="dialog-foot"><button class="btn ghost" type="button" data-close>Annuler</button><button class="btn danger-solid" type="button" data-next data-loading>{i("flag","sm")}Envoyer le signalement</button></div>
+<div class="field" data-when="trajet"><span class="label">Motif</span>{motifs(TRIP_MOTIFS)}</div>
+<div class="field" data-when="compte" hidden><span class="label">Motif</span>{motifs(ACCOUNT_MOTIFS)}</div>
+{report_details("r-msg")}
+{uploads("r-img")}
+{report_end()}
 </div>
-<div data-step hidden>{success("Signalement envoyé", "L'équipe de modération le traite sous 48 h. La personne signalée ne sait pas qui l'a signalée.")}</div>
+<div data-step hidden>{REPORT_SENT}</div>
 '''))
 
 # ================================================================== PUBLIER
 MODE_HINT = {"car": "Prix par passager, places limitées", "bike": "Gratuit, sans limite", "walk": "Gratuit, sans limite", "transit": "Gratuit, sans limite"}
 NOCAR = "mode:bike mode:walk mode:transit"
 modepick = "".join(f'<button type="button" class="m-{m}{" on" if m == "car" else ""}" data-show="mode:{m}" role="radio" aria-checked="{"true" if m == "car" else "false"}"><span class="mi">{i(ic)}</span><b>{lbl}</b><small>{MODE_HINT[m]}</small></button>' for m, (lbl, ic) in MODES.items())
+HOME_Z, CAMPUS_Z = "Noisy-le-Grand · Mont d'Est", "Cité Descartes · Copernic"
+NOCAR_W = f' data-when="{NOCAR}" hidden'
+
+def pub_preview(m, a, b):
+    if m == "car":
+        return trip("Ven. 26 sept.", "L M J V", "7 h 50", a, "8 h 20", b, "2,50 €", 3, 3, 0, "Toi", "", None, ("Non-fumeur", "Musique"), go=False, stops=PUB_STOPS)
+    return trip("Ven. 26 sept.", "L M J V", "7 h 50", a, "8 h 20", b, "", 0, 0, 0, "Toi", "", None, ("Calme", "À l'heure"), go=False, pax=["MD"], mode=m, stops=PUB_STOPS)
+
+# Aperçu : une carte par mode et par sens (vers / depuis le campus)
 previews = "".join(
-    f'<div data-when="mode:{m}"{"" if m == "car" else " hidden"}>' + (
-        trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 3, 3, 0, "Toi", "", None, ("Non-fumeur", "Musique"), go=False, stops=PUB_STOPS)
-        if m == "car" else
-        trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "", 0, 0, 0, "Toi", "", None, ("Calme", "À l'heure"), go=False, pax=["MD"], mode=m, stops=PUB_STOPS)
-    ) + '</div>' for m in MODES)
+    f'<div data-when="mode:{m}"{"" if m == "car" else " hidden"}><div data-when="sens:aller">{pub_preview(m, HOME_Z, CAMPUS_Z)}</div>'
+    f'<div data-when="sens:retour" hidden>{pub_preview(m, CAMPUS_Z, HOME_Z)}</div></div>' for m in MODES)
 def stop_row(k, zone, t):
-    """Ligne d'arrêt de Publier : zone prédéfinie + heure estimée, réordonnable (app.js renumérote et renomme les id)."""
+    """Ligne d'étape de Publier : zone prédéfinie + heure estimée, réordonnable (app.js renumérote et renomme les id)."""
     return (f'<li class="stop-row"><span class="stop-n" aria-hidden="true">{k}</span>'
-            f'<div class="field"><span class="label">Zone de l\'arrêt {k}</span>{select(f"p-stop{k}", zone or "Choisir une zone", "pin", dyn="dep")}</div>'
+            f'<div class="field"><span class="label">Zone de l\'étape {k}</span>{select(f"p-stop{k}", zone or "Choisir une zone", "pin", dyn="dep")}</div>'
             f'<div class="field"><label for="p-stop{k}-t">Heure estimée</label>{inp(f"p-stop{k}-t", t, "8 h 00", "clock")}</div>'
-            f'<div class="stop-acts"><button class="iconbtn" type="button" data-stop="up" aria-label="Avancer l\'arrêt {k}" title="Avancer">{i("up","sm")}</button>'
-            f'<button class="iconbtn" type="button" data-stop="down" aria-label="Reculer l\'arrêt {k}" title="Reculer">{i("down","sm")}</button>'
-            f'<button class="iconbtn del" type="button" data-stop="del" aria-label="Retirer l\'arrêt {k}" title="Retirer">{i("trash","sm")}</button></div></li>')
+            f'<div class="stop-acts"><button class="iconbtn" type="button" data-stop="up" aria-label="Avancer l\'étape {k}" title="Avancer">{i("up","sm")}</button>'
+            f'<button class="iconbtn" type="button" data-stop="down" aria-label="Reculer l\'étape {k}" title="Reculer">{i("down","sm")}</button>'
+            f'<button class="iconbtn del" type="button" data-stop="del" aria-label="Retirer l\'étape {k}" title="Retirer">{i("trash","sm")}</button></div></li>')
 
 stops_field = (f'<div class="field stops-field" data-max="{STOP_MAX}">'
-    f'<div class="tp-head"><span class="label">Arrêts intermédiaires <span class="muted" style="font-weight:400">(facultatif)</span></span><span class="tp-count"><b>{len(PUB_STOPS)}</b> / {STOP_MAX}</span></div>'
+    f'<div class="tp-head"><span class="label">Étapes <span class="muted" style="font-weight:400">(facultatif)</span></span><span class="tp-count"><b>{len(PUB_STOPS)}</b> / {STOP_MAX}</span></div>'
     f'<ol class="stops">{"".join(stop_row(k, z, t) for k, (t, z) in enumerate(PUB_STOPS, 1))}</ol>'
     f'<template class="stop-tpl">{stop_row(0, "", "")}</template>'
-    f'<div class="notice warn stop-warn" hidden>{i("info")}<span>Les heures doivent suivre l\'ordre du parcours : départ, arrêt 1, arrêt 2, puis arrivée.</span></div>'
-    f'<button class="btn sm ghost stop-add" type="button" data-stop="add">{i("plus","sm")}Ajouter un arrêt</button>'
-    f'<span class="hint">{STOP_MAX} arrêts au plus, dans l\'ordre du parcours. Les passagers choisissent de monter au départ ou à l\'un de tes arrêts.</span></div>')
+    f'<div class="notice warn stop-warn" hidden>{i("info")}<span>Les heures doivent suivre l\'ordre du parcours : départ, étape 1, étape 2, puis arrivée.</span></div>'
+    f'<button class="btn sm ghost stop-add" type="button" data-stop="add">{i("plus","sm")}Ajouter une étape</button>'
+    f'<span class="hint">{STOP_MAX} étapes au plus, dans l\'ordre du parcours. Les passagers choisissent de monter au départ ou à l\'une de tes étapes.</span></div>')
+
+# Confirmation de Publier : récapitulatif, puis « Ton trajet est en ligne ». La popup est hors du formulaire :
+# app.js y recopie les choix (data-show-mirror : mode, type, sens) et la couleur du mode.
+def pub_route(a, b):
+    return (f'<ol class="troute"><li><time>7 h 50</time><span class="dot"></span><span class="place"><small>Départ</small><b>{H.escape(a)}</b></span></li>'
+            + stop_lis(PUB_STOPS) + f'<li><time>8 h 20</time><span class="dot"></span><span class="place"><small>Arrivée estimée</small><b>{H.escape(b)}</b></span></li></ol>')
+
+PUB_DONE = ('<b data-when="sens:aller">Noisy-le-Grand → Copernic</b><b data-when="sens:retour" hidden>Copernic → Noisy-le-Grand</b>, '
+            '<span data-when="regulier">chaque lundi, mardi, jeudi et vendredi à 7 h 50, du 26 sept. au 19 déc.</span>'
+            '<span data-when="ponctuel" hidden>le mercredi 1er octobre à 7 h 50.</span> Il apparaît déjà dans les recherches. '
+            '<span data-when="mode:car">Tu es prévenu à chaque demande : c\'est toi qui choisis qui monte.</span>'
+            f'<span{NOCAR_W}>Tu es prévenu à chaque demande : c\'est toi qui choisis qui te rejoint.</span>')
+PUB_DONE_BTNS = ('<a class="btn ghost" href="index.html">Retour à l\'accueil</a>'
+                 f'<a class="btn" href="mon-trajet.html" data-when="mode:car">Voir mon trajet{i("arrow","sm")}</a>'
+                 f'<a class="btn" href="mes-trajets.html"{NOCAR_W}>Voir mes trajets{i("arrow","sm")}</a>')
+M_PUBLIER = modal("confirmer", f'''
+<div data-step>
+{dhead("Vérifie ton trajet", "Il sera visible dans la recherche dès sa publication.", "check")}
+<div class="recap pub-recap">
+<div class="row" style="gap:6px">{"".join(f'<span data-when="mode:{m}"{"" if m == "car" else " hidden"}>{mode_tag(m)}</span>' for m in MODES)}<span class="badge reg" data-when="regulier">{i("repeat","sm")}Régulier · L M J V</span><span class="badge line" data-when="ponctuel" hidden>Ponctuel · mer. 1er oct.</span></div>
+<div data-when="sens:aller">{pub_route(HOME_Z, CAMPUS_Z)}</div>
+<div data-when="sens:retour" hidden>{pub_route(CAMPUS_Z, HOME_Z)}</div>
+<div class="between small" data-when="regulier"><span class="muted">Période</span><b>du 26 sept. au 19 déc., hors vacances</b></div>
+<div class="between small" data-when="mode:car"><span class="muted">Places</span><b>3 · Renault Clio grise</b></div>
+<div class="between small" data-when="mode:car"><b>Prix par passager</b><b class="num">2,50 €</b></div>
+<div class="between small"{NOCAR_W}><span class="muted">Places</span><b>Gratuit, sans limite</b></div>
+<div class="row" style="gap:6px"><span class="row" style="gap:6px" data-when="mode:car">{tags_static(["Non-fumeur", "Musique"])}</span><span class="row" style="gap:6px"{NOCAR_W}>{tags_static(["Calme", "À l'heure"])}</span></div>
+{trip_desc(PUB_DESC, "Description", out=True)}
+</div>
+<div class="notice">{i("info")}<span data-when="mode:car">Tu es prévenu à chaque demande : c'est toi qui choisis qui monte. Tu pourras modifier ou annuler le trajet à tout moment.</span><span{NOCAR_W}>Tu es prévenu à chaque demande : c'est toi qui choisis qui te rejoint. Tu pourras modifier ou annuler le trajet à tout moment.</span></div>
+<div class="dialog-foot"><button class="btn ghost" type="button" data-close>{i("edit","sm")}Modifier</button><button class="btn secondary" type="button" data-next data-loading>{i("check","sm")}Publier le trajet</button></div>
+</div>
+<div data-step hidden>{success("Ton trajet est en ligne !", PUB_DONE, PUB_DONE_BTNS, close=False)}</div>
+''', cls="mode-scope m-car", attrs=" data-show-mirror")
 
 PAGES["publier"] = dict(title="Publier un trajet", mtitle="Publier", sub="En voiture, à vélo, à pied ou en transports en commun.", body=f'''
 <div class="split mode-scope m-car" data-show-scope>
 <section class="card">
 <div class="field"><span class="label">Mode de déplacement</span><div class="modepick" data-single role="radiogroup" aria-label="Mode de déplacement">{modepick}</div></div>
 <div class="field"><span class="label">Type de trajet</span><div class="seg" data-single><button type="button" data-show="ponctuel">Ponctuel</button><button type="button" class="on" data-show="regulier">Régulier</button></div></div>
-<div class="grid-2">
-<div class="field"><span class="label">Départ</span>{select("p-dep", "Noisy-le-Grand · Mont d'Est")}</div>
-<div class="field"><span class="label">Arrivée</span>{select("p-arr", "Cité Descartes · Copernic")}</div>
+<div class="field"><span class="label">Sens du trajet</span><div class="seg" data-single><button type="button" class="on" data-show="sens:aller">Vers le campus</button><button type="button" data-show="sens:retour">Depuis le campus</button></div></div>
+<div class="grid-2" data-when="sens:aller">
+<div class="field"><span class="label">Départ</span>{select("p-dep", HOME_Z, dyn="dep")}</div>
+<div class="field"><span class="label">Arrivée sur le campus</span>{select("p-arr", CAMPUS_Z, "campus", dyn="arr")}</div>
 </div>
-<p class="small muted" style="margin-top:-8px">Zones de rendez-vous définies par l'université : ton adresse n'est jamais demandée.</p>
+<div class="grid-2" data-when="sens:retour" hidden>
+<div class="field"><span class="label">Départ du campus</span>{select("p-dep-r", CAMPUS_Z, "campus", dyn="arr")}</div>
+<div class="field"><span class="label">Arrivée</span>{select("p-arr-r", HOME_Z, dyn="dep")}</div>
+</div>
+<p class="small muted" style="margin-top:-8px">Un trajet U-Mobility part du campus ou y arrive. Les zones de rendez-vous sont définies par l'université : ton adresse n'est jamais demandée.</p>
 <div class="field" data-when="regulier"><span class="label">Jours</span>{days([0, 1, 3, 4])}</div>
 <div class="field" data-when="ponctuel" hidden><label for="p-date">Date</label>{inp("p-date", "Mer. 1er oct.", "", "calendar")}</div>
 <div class="grid-3">
@@ -870,24 +1092,30 @@ PAGES["publier"] = dict(title="Publier un trajet", mtitle="Publier", sub="En voi
 <div class="field"><label for="p-price">Participation par passager</label>{inp("p-price", "2,50 €")}<span class="hint">Suggestion : 2,40 € pour 12 km.</span></div>
 <div class="field"><span class="label">Véhicule</span>{select("p-car", "Renault Clio · grise · 3 places", "car", [("Mes véhicules", ["Renault Clio · grise · 3 places"])])}<button class="linkbtn" type="button" data-open="voiture" style="font-size:13px">{i("plus","sm")}Ajouter une voiture</button></div>
 </div>
-<div class="notice" data-when="{NOCAR}" hidden>{i("users")}<span>Sans voiture, pas de prix ni de limite de places : tout le monde peut rejoindre. Le trajet affiche le nombre de personnes qui ont rejoint.</span></div>
+<div class="notice" data-when="{NOCAR}" hidden>{i("users")}<span>Sans voiture, pas de prix ni de limite de places : chacun demande à rejoindre, tu acceptes ou refuses. Le trajet affiche le nombre de personnes qui ont rejoint.</span></div>
 <div class="field">{tp_head('Tags <span class="muted" style="font-weight:400">(facultatif)</span>', ["Non-fumeur", "Musique"], TAG_MAX)}{tagpick("p-tags", ["Non-fumeur", "Musique"], mode="car", max_=TAG_MAX)}
 <span class="hint">Jusqu'à {TAG_MAX} tags, selon le mode choisi. Ils aident les autres à trouver ton trajet : ils sont comparés à leurs recherches et à leurs préférences.</span></div>
-<div class="optline" data-when="mode:car"><span>Accepter automatiquement les passagers déjà notés 4 ★ et plus</span><button class="toggle" type="button" aria-pressed="false" aria-label="Acceptation automatique"></button></div>
-<div class="dialog-foot"><a class="btn ghost" href="index.html">Annuler</a><button class="btn secondary" type="button" data-loadtoast="Trajet publié · visible dans Mes trajets">{i("check","sm")}Publier le trajet</button></div>
+<div class="field"><label for="p-desc">Description <span class="muted" style="font-weight:400">(facultatif)</span></label>{textarea("p-desc", "Ex. : j'attends 5 min au plus au point de rendez-vous, préviens-moi si tu as un imprévu.", DESC_MAX, PUB_DESC)}
+<span class="hint">Visible dans le détail du trajet. Ne donne ni ton adresse ni ton numéro : le point de rendez-vous exact se partage dans la messagerie après acceptation.</span></div>
+<div class="dialog-foot"><a class="btn ghost" href="index.html">Annuler</a><button class="btn secondary" type="button" data-open="confirmer">{i("check","sm")}Publier le trajet</button></div>
 </section>
 <aside class="stack">
 <h2>Aperçu</h2>
 {previews}
 </aside>
 </div>
-''', modals="")  # modal voiture ajouté plus bas (partagé avec profil)
+''', modals=M_PUBLIER)  # + popup voiture, ajoutée plus bas (partagée avec le profil)
 
 # ================================================================== MES TRAJETS
 def req(init, name, rating, dd, places, note, board="au départ"):
+    """dd : jours demandés (None pour un trajet ponctuel) ; places et board vides hors voiture sans étape."""
     msg = f'<span class="small">« {note} »</span>' if note else '<span class="small muted">Aucun message</span>'
-    return (f'<div class="req"><span class="avatar">{init}</span><div class="grow"><b>{name} · {stars(rating)}</b>'
-            f'<div class="row" style="gap:8px"><span class="small muted">Jours demandés</span>{days(dd, pick=False, mini=True)}<span class="small muted">· {places} · monte {board}</span></div>{msg}</div>'
+    jours = f'<span class="small muted">Jours demandés</span>{days(dd, pick=False, mini=True)}' if dd else ""
+    info = " · ".join(x for x in (places, f"monte {board}" if board else "") if x)
+    info = f'<span class="small muted">{"· " if jours else ""}{info}</span>' if info else ""
+    line = f'<div class="row" style="gap:8px">{jours}{info}</div>' if jours or info else ""
+    return (f'<div class="req"><span class="avatar">{init}</span><div class="grow"><b>{person(init)} · {stars(rating)}</b>'
+            f'{line}{msg}</div>'
             f'<div class="acts"><button class="btn sm danger" type="button" data-toast="Demande de {name} refusée" data-remove=".req">{i("x","sm")}Refuser</button>'
             f'<button class="btn sm success" type="button" data-toast="{name} a rejoint le trajet" data-remove=".req">{i("check","sm")}Accepter</button></div></div>')
 
@@ -907,21 +1135,33 @@ M_ANNULER = modal("annuler", f'''
 </div>
 <div data-step hidden>{success("Place annulée", "La place est de nouveau disponible pour les autres passagers.")}</div>
 ''')
-M_ANNULER_TRAJET = modal("annuler-trajet", f'''
+def annuler_trajet(id_, sub, reasons, notice, choices=None, attrs=""):
+    """Annulation d'un trajet par son conducteur / organisateur ; choices : une date ou tout le trajet régulier ;
+    attrs : ex. data-in-view, la vue de la page sous la popup quand on l'ouvre par son ancre."""
+    pick = (f'<div class="field"><span class="label">Que veux-tu annuler ?</span><div class="seg" data-single>'
+            + "".join(f'<button type="button"{ACT.replace("active", "on") if k == 0 else ""}>{c}</button>' for k, c in enumerate(choices)) + '</div></div>') if choices else ""
+    return modal(id_, f'''
 <div data-step>
-{dhead("Annuler le trajet ?", "Noisy-le-Grand → Copernic · régulier L M J V · 7 h 50", "x", True)}
-<div class="field"><span class="label">Que veux-tu annuler ?</span><div class="seg" data-single><button type="button" class="on">Le ven. 26 sept. seulement</button><button type="button">Tout le trajet régulier</button></div></div>
-<div class="field"><span class="label">Motif <span class="muted" style="font-weight:400">(visible par les passagers)</span></span><div class="row" style="gap:6px">{"".join(f'<button class="chip{" on" if k == 0 else ""}" data-radio type="button">{m}</button>' for k, m in enumerate(["Empêchement", "Voiture indisponible", "Changement d'emploi du temps", "Autre"]))}</div></div>
-<div class="notice">{i("users")}<span>1 passager confirmé et 2 demandes en attente seront prévenus. Les demandes en attente sont refusées automatiquement.</span></div>
+{dhead("Annuler le trajet ?", sub, "x", True)}
+{pick}
+<div class="field"><span class="label">Motif <span class="muted" style="font-weight:400">(visible par les membres du trajet)</span></span>{motifs(reasons)}</div>
+<div class="notice">{i("users")}<span>{notice}</span></div>
 <div class="dialog-foot"><button class="btn ghost" type="button" data-close>Garder le trajet</button><button class="btn danger-solid" type="button" data-next data-loading>Annuler le trajet</button></div>
 </div>
-<div data-step hidden>{success("Trajet annulé", "Les passagers ont été prévenus dans la messagerie du trajet.")}</div>
-''')
+<div data-step hidden>{success("Trajet annulé", "Les membres du trajet ont été prévenus dans sa messagerie.")}</div>
+''', attrs=attrs)
+M_ANNULER_TRAJET = annuler_trajet("annuler-trajet", "Noisy-le-Grand → Copernic · régulier L M J V · 7 h 50",
+    ["Empêchement", "Voiture indisponible", "Changement d'emploi du temps", "Autre"],
+    "1 passager confirmé et 2 personnes en attente seront prévenus dans la messagerie du trajet.",
+    ["Le ven. 26 sept. seulement", "Tout le trajet régulier"])
+M_ANNULER_PIED = annuler_trajet("annuler-pied", "À pied · Noisy-Champs → Copernic · mar. 30 sept. · 8 h 05",
+    ["Empêchement", "Changement d'emploi du temps", "Météo", "Autre"],
+    "Les 3 participants seront prévenus dans la messagerie du trajet ; la demande en attente est close.", attrs=' data-in-view="a-pied"')
 M_NOTER_C = modal("noter-conducteur", f'''
 <div data-step>
 {dhead("Noter Léa", "Trajet du jeu. 18 sept. · Noisy-le-Grand → Copernic", "star")}
 <div class="card tight" style="box-shadow:none;background:var(--surface)"><div class="row"><span class="avatar">LM</span><div class="grow"><b>Léa M.</b><span class="small muted" style="display:block">Conductrice</span></div></div>{rate("rate-lea", 0)}</div>
-<p class="small muted">La note est anonyme pour Léa et n'a pas de commentaire écrit. Un problème ? <button class="linkbtn red" type="button" data-open="signaler-compte" style="font-size:13px">Signaler plutôt ce compte</button></p>
+<p class="small muted">La note est anonyme pour Léa et n'a pas de commentaire écrit. Un problème ? <button class="linkbtn red" type="button" data-open="signaler-compte" data-person="{person_data("LM")}" style="font-size:13px">Signaler plutôt ce compte</button></p>
 <div class="dialog-foot"><button class="btn ghost" type="button" data-close>Plus tard</button><button class="btn" type="button" data-next data-loading>Envoyer ma note</button></div>
 </div>
 <div data-step hidden>{success("Merci !", "Ta note aide les autres étudiants à choisir leurs trajets.")}</div>
@@ -939,41 +1179,67 @@ M_NOTER_P = modal("noter-passagers", f'''
 </div>
 <div data-step hidden>{success("Notes envoyées", "Merci d'aider la communauté U-Mobility.")}</div>
 ''', wide=True)
-MEMBERS = [("LM", "Léa M.", "Conductrice"), ("IN", "Inès N.", "Passagère"), ("TK", "Thomas K.", "Passager")]
+MEMBERS = [("LM", "Léa M.", "Conductrice"), ("IN", "Inès N.", "Passagère"), ("TK", "Thomas K.", "Passager"), ("CL", "Chloé L.", "Ancienne membre · a quitté le 23 sept.")]
 M_SIGNALER_COMPTE = modal("signaler-compte", f'''
-<div data-step>
+<div data-step data-guard>
 {dhead("Signaler un compte", "Ton signalement est transmis uniquement à l'équipe de modération.", "flag", True)}
-<div class="field"><span class="label">Qui veux-tu signaler ?</span><div class="list">{"".join(f'<div class="li click{" sel" if k == 0 else ""}" data-conv><span class="avatar sm">{a}</span><div class="grow"><b>{n}</b><span>{r}</span></div></div>' for k, (a, n, r) in enumerate(MEMBERS))}</div></div>
-<div class="field"><span class="label">Motif</span><div class="row" style="gap:6px">{"".join(f'<button class="chip{" on" if k == 1 else ""}" data-radio type="button">{m}</button>' for k, m in enumerate(["Comportement inapproprié", "Absence au rendez-vous", "Conduite dangereuse", "Harcèlement", "Faux profil", "Autre"]))}</div></div>
-<div class="field"><label for="rc-msg">Détails <span class="muted" style="font-weight:400">(facultatif)</span></label>{textarea("rc-msg", "Décris ce qui s'est passé.", 500)}</div>
-<div class="notice warn">{i("info")}<span>En cas d'urgence, appelle le 112. Ce formulaire ne remplace pas les secours.</span></div>
-<div class="dialog-foot"><button class="btn ghost" type="button" data-close>Annuler</button><button class="btn danger-solid" type="button" data-next data-loading>{i("flag","sm")}Envoyer le signalement</button></div>
+<div class="field report-target" hidden><span class="label">Compte signalé</span><div class="who-card"><span class="avatar sm" data-r="ini">CL</span><span class="grow"><b data-r="name">{PEOPLE["CL"][0]}</b><span data-r="sub">{PEOPLE["CL"][1]}</span></span></div></div>
+<div class="field report-pick"><span class="label">Qui veux-tu signaler ?</span><div class="list report-who">{"".join(f'<div class="li click{" sel" if k == 0 else ""}" data-conv><span class="avatar sm">{a}</span><div class="grow"><b>{n}</b><span>{r}</span></div></div>' for k, (a, n, r) in enumerate(MEMBERS))}</div></div>
+<div class="field"><span class="label">Motif</span>{motifs(ACCOUNT_MOTIFS, 1)}</div>
+<div class="notice">{i("star")}<span>Un retard, une ambiance qui ne t'a pas plu ? <b>Une note suffit</b> : le signalement est réservé aux manquements aux règles. <a class="more" href="historique.html#noter-conducteur">Noter plutôt</a></span></div>
+{report_details("rc-msg")}
+{uploads("rc-img")}
+<div class="optline"><span><b>Joindre les messages de la conversation</b><span class="small muted" style="display:block">Les 30 derniers jours du trajet concerné. Seule l'équipe de modération les lit, pour ce signalement uniquement.</span></span><button class="toggle" type="button" aria-pressed="false" aria-label="Joindre les messages de la conversation"></button></div>
+{report_end()}
 </div>
-<div data-step hidden>{success("Signalement envoyé", "L'équipe de modération le traite sous 48 h. La personne signalée ne sait pas qui l'a signalée.")}</div>
+<div data-step hidden>{REPORT_SENT}</div>
+''')
+# Mini-profil d'une personne (clic sur son nom ou sa ligne), avec « Signaler ce compte », discret, en bas :
+# le signalement s'ouvre alors sur cette personne, sans liste à choisir (data-person sur le bouton, app.js).
+# Contenu par défaut : Chloé, ancienne membre (messages.html#profil) ; app.js le remplit avec le data-person cliqué.
+_cl = PEOPLE["CL"]
+M_PROFIL = modal("profil", f'''
+<div class="dialog-head"><span class="avatar lg" data-p="ini">CL</span><div class="grow"><h2 data-p="name">{_cl[0]}</h2><p class="muted" data-p="sub">{_cl[1]}</p><span class="stars">{STAR_SVG}<span data-p="rate">{_cl[2]}</span></span></div><button class="iconbtn" type="button" data-close aria-label="Fermer">{i("x","sm")}</button></div>
+<div class="row" style="gap:6px"><span class="badge ok">{i("shield","sm")}Compte universitaire vérifié</span><span class="badge line" data-p="trips">{_cl[3]}</span><span class="badge line" data-p="together">{i("users","sm")}<span>{_cl[5]}</span></span><span class="badge line" data-p="reply" hidden>{i("clock","sm")}<span></span></span></div>
+<div class="notice" data-p="note">{i("leave")}<span>{CHLOE_LEFT}</span></div>
+<div class="divider"></div>
+<div class="between"><span class="small muted">Un problème avec cette personne ?</span><button class="linkbtn red" type="button" data-open="signaler-compte" data-person="{person_data("CL", CHLOE_LEFT)}">{i("flag","sm")}Signaler ce compte</button></div>
 ''')
 
-PAGES["trajet"]["modals"] += M_ANNULER  # vue passager confirmé (trajet.html#membre)
+PAGES["trajet"]["modals"] += M_ANNULER + M_PROFIL + M_SIGNALER_COMPTE  # vue passager confirmé (trajet.html#membre), profils cliquables
 
-# Mes trajets : la liste des trajets à venir, sans les demandes (gérées dans le détail conducteur) ni les notes (Historique).
+# Mes trajets : les trajets à venir (deux rôles), puis « Mes demandes » (en attente : bandeau orange, bordure normale).
+# Les demandes reçues se gèrent dans la vue conducteur / organisateur, les notes dans l'Historique.
+RETIRER = f'<button class="btn sm danger" type="button" data-toast="Demande retirée" data-remove=".trip">{i("x","sm")}Retirer ma demande</button>'
 PAGES["mes-trajets"] = dict(title="Mes trajets", mtitle="Mes trajets", body=f'''
-<div class="between"><div class="row" style="gap:6px" data-filter-list="mt-list"><button class="chip on" data-radio data-filter="" type="button">Tous <span class="muted">5</span></button><button class="chip mchip r-d" data-radio data-filter="role-d" type="button">{i("wheel","sm")}Conducteur</button><button class="chip mchip r-p" data-radio data-filter="role-p" type="button">{i("seat","sm")}Passager</button>{"".join(f'<button class="chip mchip m-{m}" data-radio data-filter="m-{m}" type="button">{i(ic,"sm")}{lbl}</button>' for m, (lbl, ic) in MODES.items() if m != "car")}</div>
-<a class="more small" href="historique.html">Trajets passés et notes{i("chevr","sm")}</a></div>
-<div class="stack" id="mt-list">
-{trip("Demain · jeu. 25 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 1, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur",), status='<span class="badge ok">' + i("check","sm") + 'Place confirmée</span>', role="p", pax=["MD", "IN"], href="trajet.html#membre", cancel=f'<button class="btn sm danger" type="button" data-open="annuler">{i("x","sm")}Annuler ma place</button>', stops=LEA_STOPS)}
+{trips_switch("mes-trajets")}
+<div class="row" style="gap:6px" data-filter-list="mt-list"><button class="chip on" data-radio data-filter="" type="button">Tous <span class="muted">7</span></button><button class="chip mchip r-d" data-radio data-filter="role-d" type="button">{i("wheel","sm")}Conducteur</button><button class="chip mchip r-p" data-radio data-filter="role-p" type="button">{i("seat","sm")}Passager</button>{"".join(f'<button class="chip mchip m-{m}" data-radio data-filter="m-{m}" type="button">{i(ic,"sm")}{lbl}</button>' for m, (lbl, ic) in MODES.items() if m != "car")}</div>
+<div class="stack-lg" id="mt-list">
+<section class="stack" data-filter-sec>
+<div class="card-head"><h2>Mes trajets acceptés</h2><span class="badge line">5 à venir</span></div>
+{trip("Demain · jeu. 25 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 1, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur",), board="Mont d'Est · 7 h 50", role="p", pax=["MD", "IN"], href="trajet.html#membre", cancel=f'<button class="btn sm danger" type="button" data-open="annuler">{i("x","sm")}Annuler ma place</button>', stops=LEA_STOPS)}
 {trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Toi", "", None, ("Non-fumeur", "Musique"), role="d", pax=["CL"], cancel=f'<button class="btn sm danger" type="button" data-open="annuler-trajet">{i("x","sm")}Annuler le trajet</button>', actions=f'<a class="btn sm ghost" href="publier.html">{i("edit","sm")}Modifier</a>', stops=MY_STOPS)}
-{trip("Ven. 26 sept.", "Ponctuel", "17 h 45", "Cité Descartes · Bienvenüe", "18 h 10", "Torcy · Centre", "3,00 €", 2, 3, 0, "Yanis B.", "4,7", 12, ("Bagages",), status='<span class="badge wait">' + i("clock","sm") + 'Demande envoyée</span>', role="p", pax=["HP"], sent=True, cancel=f'<button class="btn sm danger" type="button" data-toast="Demande retirée" data-remove=".trip">{i("x","sm")}Retirer ma demande</button>')}
 {trip("Lun. 29 sept.", "L J", "17 h 30", "Cité Descartes · Copernic", "17 h 50", "Noisy-Champs · Gare RER A", "", 0, 0, 0, "Amina S.", "5,0", 22, ("Calme",), role="p", pax=["AS", "MD", "PR", "CL", "HP"], mode="bike", href="trajet.html#velo", cancel=f'<button class="btn sm danger" type="button" data-toast="Tu as quitté le trajet à vélo" data-remove=".trip">{i("leave","sm")}Quitter</button>')}
+{trip("Mar. 30 sept.", "Ponctuel", "8 h 05", "Noisy-Champs · Gare RER A", "8 h 25", "Cité Descartes · Copernic", "", 0, 0, 1, "Toi", "", None, ("Discussion", "À l'heure"), role="d", pax=["MD", "PR", "YB", "AS"], mode="walk", href="mon-trajet.html#a-pied", cancel=f'<button class="btn sm danger" type="button" data-open="annuler-pied">{i("x","sm")}Annuler le trajet</button>', actions=f'<a class="btn sm ghost" href="publier.html">{i("edit","sm")}Modifier</a>')}
 {trip("Mer. 1er oct.", "Ponctuel", "18 h 00", "Cité Descartes · Copernic", "18 h 30", "Chelles · Gare", "2,00 €", 3, 3, 0, "Toi", "", None, (), role="d", cancel=f'<button class="btn sm danger" type="button" data-open="annuler-trajet">{i("x","sm")}Annuler le trajet</button>', actions=f'<a class="btn sm ghost" href="publier.html">{i("edit","sm")}Modifier</a>')}
+</section>
+<section class="stack" data-filter-sec>
+<div class="card-head"><div><h2>Mes demandes</h2><p class="small muted">En attente de réponse. Tu peux retirer une demande à tout moment.</p></div><span class="badge wait">{i("hourglass","sm")}2 en attente</span></div>
+{trip("Ven. 26 sept.", "Ponctuel", "17 h 45", "Cité Descartes · Bienvenüe", "18 h 10", "Torcy · Centre", "3,00 €", 2, 3, 0, "Yanis B.", "4,7", 12, ("Bagages",), role="p", pax=["HP"], sent=True, reply=YANIS_REPLY, cancel=RETIRER)}
+{trip("Mer. 1er oct.", "L M M J V", "7 h 55", "Noisy-Champs · Gare RER A", "8 h 20", "Cité Descartes · Copernic", "", 0, 0, 0, "Chloé L.", "4,7", 18, ("Discussion",), role="p", pax=["CL", "IN", "TK"], mode="walk", href="trajet.html#pied", sent=True, reply=CHLOE_REPLY, cancel=RETIRER)}
+</section>
 </div>
-<div class="notice">{i("info")}<span>Les demandes reçues se traitent dans le détail de chaque trajet que tu conduis. Les notes se donnent depuis l'<a href="historique.html">Historique</a>.</span></div>
-''', modals=M_ANNULER + M_ANNULER_TRAJET)
+<div class="notice">{i("info")}<span>Les demandes reçues se traitent dans le détail de chaque trajet que tu conduis ou organises. Les notes se donnent depuis l'<a href="historique.html">Historique</a>.</span></div>
+''', modals=M_ANNULER + M_ANNULER_TRAJET + M_ANNULER_PIED)
 
 # ================================================================== MON TRAJET (vue conducteur)
+# Vue organisateur : voiture par défaut (passagers, demandes) ; #a-pied = trajet sans voiture (participants, demandes sans places).
 PAGES["mon-trajet"] = dict(title="Mon trajet", mtitle="Mon trajet", back="mes-trajets", active="mes-trajets", body=f'''
-<div class="crumb"><a href="mes-trajets.html">Mes trajets</a>{i("chevr","sm")}<span>Noisy-le-Grand → Copernic · ven. 26 sept.</span></div>
-<div class="split mode-scope m-car">
+<div class="crumb" data-view="voiture" data-mode="car" data-mtitle="Mon trajet"><a href="mes-trajets.html">Mes trajets</a>{i("chevr","sm")}<span>Noisy-le-Grand → Copernic · ven. 26 sept.</span></div>
+<div class="crumb" data-view="a-pied" data-mode="walk" data-mtitle="Mon trajet à pied" data-back="mes-trajets" hidden><a href="mes-trajets.html">Mes trajets</a>{i("chevr","sm")}<span>À pied · Noisy-Champs → Copernic · mar. 30 sept.</span></div>
+<div class="split mode-scope m-car" data-mode-default="car">
 <div class="stack-lg">
-<section class="card">
+<section class="card" data-view="voiture">
 <div class="between" style="align-items:flex-start"><div class="stack" style="gap:6px;justify-items:start"><div class="row" style="gap:6px">{role_tag("d")}{mode_tag("car")}<span class="badge reg">{i("repeat","sm")}Trajet régulier</span></div><h2>Chaque lundi, mardi, jeudi et vendredi</h2></div>
 <div class="stack price-box" style="gap:2px"><span class="price" style="font-size:26px;line-height:30px">2,50 € <small>/ passager</small></span></div></div>
 <div class="recur">
@@ -988,37 +1254,73 @@ PAGES["mon-trajet"] = dict(title="Mon trajet", mtitle="Mon trajet", back="mes-tr
 </ol>
 <div class="grid-auto">
 <div class="stack" style="gap:2px"><span class="small muted">Places</span><b>1 prise sur 3</b></div>
-<div class="stack" style="gap:2px"><span class="small muted">Arrêts</span><b>{len(MY_STOPS)} sur {STOP_MAX}</b></div>
+<div class="stack" style="gap:2px"><span class="small muted">Étapes</span><b>{len(MY_STOPS)} sur {STOP_MAX}</b></div>
 <div class="stack" style="gap:2px"><span class="small muted">Véhicule</span><b>Clio grise</b></div>
 <div class="stack" style="gap:2px"><span class="small muted">CO₂ évité / trajet</span><b>1,4 kg</b></div>
 </div>
+{trip_desc(PUB_DESC, "Ta description")}
 <div class="row" style="gap:6px">{tags_static(["Non-fumeur", "Musique"])}</div>
 </section>
-<section class="card" id="demandes">
-<div class="card-head"><div><h2>Demandes en attente</h2><p class="small muted">Accepte ou refuse chaque passager. Sans réponse sous 24 h, la demande est refusée automatiquement.</p></div><span class="badge wait">{i("hourglass","sm")}2 en attente</span></div>
+<section class="card" id="demandes" data-view="voiture">
+<div class="card-head"><div><h2>Demandes en attente</h2><p class="small muted">Accepte ou refuse chaque passager. Une demande reste en attente jusqu'à ta réponse (rappel au bout de 12 h) ; le passager peut la retirer à tout moment.</p></div><span class="badge wait">{i("hourglass","sm")}2 en attente</span></div>
 <div class="req-list">
-{req("IN", "Inès N.", "4,8", [3, 4], "1 place", "Je t'attendrai côté gare routière.", "à Noisy-Champs (arrêt 1)")}
-{req("TK", "Thomas K.", "4,5", [4], "1 place", "", "à Noisy-Champs (arrêt 1)")}
+{req("IN", "Inès N.", "4,8", [3, 4], "1 place", "Je t'attendrai côté gare routière.", "à Noisy-Champs (étape 1)")}
+{req("TK", "Thomas K.", "4,5", [4], "1 place", "", "à Noisy-Champs (étape 1)")}
+</div>
+</section>
+<section class="card" data-view="a-pied" hidden>
+<div class="between" style="align-items:flex-start"><div class="stack" style="gap:6px;justify-items:start"><div class="row" style="gap:6px">{role_tag("d", "walk")}{mode_tag("walk")}<span class="badge line">Ponctuel</span></div><h2>Mardi 30 septembre</h2></div><span class="free-tag" style="font-size:22px;line-height:28px">Gratuit</span></div>
+<ol class="troute" style="gap:22px">
+<li><time>8 h 05</time><span class="dot"></span><span class="place"><small>Départ</small><b>Noisy-Champs · Gare RER A</b><span class="meet">{i("pin","sm")}Rendez-vous sous l'horloge, sortie 2</span></span></li>
+<li><time>8 h 25</time><span class="dot"></span><span class="place"><small>Arrivée estimée</small><b>Cité Descartes · Copernic</b><span class="small muted">Entrée principale</span></span></li>
+</ol>
+<div class="grid-auto">
+<div class="stack" style="gap:2px"><span class="small muted">Distance</span><b>1,6 km</b></div>
+<div class="stack" style="gap:2px"><span class="small muted">Durée</span><b>20 min</b></div>
+<div class="stack" style="gap:2px"><span class="small muted">Participants</span><b>3 + toi</b></div>
+</div>
+<div class="notice">{i("users")}<span>Sans voiture : pas de prix ni de limite de places. C'est toi qui acceptes chaque personne ; tu es prévenu quand quelqu'un quitte le trajet.</span></div>
+{trip_desc("", "Ta description", edit=True)}
+<div class="row" style="gap:6px">{tags_static(["Discussion", "À l'heure"])}</div>
+</section>
+<section class="card" data-view="a-pied" hidden>
+<div class="card-head"><div><h2>Demandes en attente</h2><p class="small muted">Accepte ou refuse chaque personne. Une demande reste en attente jusqu'à ta réponse (rappel au bout de 12 h) ; elle peut être retirée à tout moment.</p></div><span class="badge wait">{i("hourglass","sm")}1 en attente</span></div>
+<div class="req-list">
+{req("HP", "Hugo P.", "4,6", None, "", "Je pars aussi de Noisy-Champs, à mardi !", "")}
 </div>
 </section>
 </div>
 <aside class="stack-lg">
-<section class="card">
+<section class="card" data-view="voiture">
 <div class="card-head"><h2>Passagers</h2><span class="badge seats">2 places restantes</span></div>
 <div class="list">
-<div class="li"><span class="avatar sm">CL</span><div class="grow"><b>Chloé L. · {stars("4,7")}</b><span>Passagère · V · monte à Nesles (arrêt 2)</span></div><button class="iconbtn flag" type="button" data-open="signaler-compte" aria-label="Signaler Chloé" title="Signaler Chloé">{i("flag","sm")}</button></div>
+{person_row("CL", "Passagère · V · monte à Nesles (étape 2)", bold=f'Chloé L. · {stars("4,7")}')}
 <div class="li"><span class="seat-free lg" aria-hidden="true"></span><div class="grow"><b class="muted">Place libre</b></div></div>
 <div class="li"><span class="seat-free lg" aria-hidden="true"></span><div class="grow"><b class="muted">Place libre</b></div></div>
 </div>
 </section>
-<section class="card">
+<section class="card" data-view="voiture">
 <a class="btn block" href="messages.html">{i("msg","sm")}Messagerie du trajet</a>
 <a class="btn ghost block" href="publier.html">{i("edit","sm")}Modifier le trajet</a>
 <button class="btn danger block" type="button" data-open="annuler-trajet">{i("x","sm")}Annuler le trajet</button>
 </section>
+<section class="card" data-view="a-pied" hidden>
+<div class="card-head"><h2>Participants</h2><span class="badge joined">{i("users","sm")}4 personnes ont rejoint</span></div>
+<div class="list">
+<div class="li"><span class="avatar sm">MD</span><div class="grow"><b>Toi</b><span>Organisateur</span></div></div>
+{person_row("PR", "A rejoint le 24 sept.")}
+{person_row("YB", "A rejoint le 25 sept.")}
+{person_row("AS", "A rejoint hier")}
+</div>
+</section>
+<section class="card" data-view="a-pied" hidden>
+<a class="btn block" href="messages.html">{i("msg","sm")}Messagerie du trajet</a>
+<a class="btn ghost block" href="publier.html">{i("edit","sm")}Modifier le trajet</a>
+<button class="btn danger block" type="button" data-open="annuler-pied">{i("x","sm")}Annuler le trajet</button>
+</section>
 </aside>
 </div>
-''', modals=M_ANNULER_TRAJET + M_SIGNALER_COMPTE)
+''', modals=M_ANNULER_TRAJET + M_ANNULER_PIED + M_PROFIL + M_SIGNALER_COMPTE)
 
 # ================================================================== HISTORIQUE
 months = [("Avr", 142), ("Mai", 188), ("Juin", 96), ("Juil", 24), ("Août", 0), ("Sept", 168)]
@@ -1042,7 +1344,8 @@ for month, items in hist:
         av = '<span class="avatars">' + "".join(f'<span class="avatar xs">{x}</span>' for x in who) + '</span>'
         gv = stars5(given) if given else f'<button class="btn sm" type="button" data-open="{"noter-passagers" if role == "d" else "noter-conducteur"}">{i("star","sm")}Noter</button>'
         rows += f'<tr><td class="muted" style="white-space:nowrap">{d}</td><td><b>{r}</b><br><span class="small muted num">{t}</span></td><td>{role_tag(role)}</td><td>{av}</td><td class="num" style="white-space:nowrap">{km} · {co}</td><td>{gv}</td></tr>'
-PAGES["historique"] = dict(title="Historique", mtitle="Historique", back="index", body=f'''
+PAGES["historique"] = dict(title="Historique", mtitle="Historique", back="mes-trajets", body=f'''
+{trips_switch("historique")}
 <section class="card">
 <div class="card-head"><div><h2>À noter</h2><p class="small muted">Note tes trajets terminés : 1 à 5 étoiles, sans commentaire.</p></div><span class="badge">2</span></div>
 <div class="list">
@@ -1099,15 +1402,15 @@ PAGES["messages"] = dict(title="Messages", mtitle="Messages", back="index", sub=
 <div class="divider"></div>
 <div class="chat">
 <span class="daysep">Lundi 15 septembre</span>
-<span class="sys">{i("car","sm")}<span><b>Léa</b> a créé le trajet</span></span>
+<span class="sys">{i("car","sm")}<span><b>{person("LM", "Léa")}</b> a créé le trajet</span></span>
 <span class="sys">{i("join","sm")}<span><b>Mathis</b> a rejoint le trajet (L J V)</span></span>
-<span class="sys">{i("join","sm")}<span><b>Inès</b> a rejoint le trajet (J V)</span></span>
-<div class="bubble in"><span class="by">Léa</span>Bienvenue ! Je me gare devant la pharmacie du Mont d'Est.<small>18 h 02</small></div>
+<span class="sys">{i("join","sm")}<span><b>{person("IN", "Inès")}</b> a rejoint le trajet (J V)</span></span>
+<div class="bubble in">{person("LM", "Léa", cls="by who-link")}Bienvenue ! Je me gare devant la pharmacie du Mont d'Est.<small>18 h 02</small></div>
 <span class="daysep">Hier</span>
-<span class="sys">{i("edit","sm")}<span><b>Léa</b> a modifié l'heure de départ : <b>7 h 45 → 7 h 50</b></span></span>
-<span class="sys red">{i("leave","sm")}<span><b>Chloé</b> a quitté le trajet</span></span>
-<span class="sys">{i("join","sm")}<span><b>Thomas</b> a rejoint le trajet (V)</span></span>
-<div class="bubble in"><span class="by">Inès</span>Je serai là 5 min avant demain.<small>20 h 14</small></div>
+<span class="sys">{i("edit","sm")}<span><b>{person("LM", "Léa")}</b> a modifié l'heure de départ : <b>7 h 45 → 7 h 50</b></span></span>
+<span class="sys red">{i("leave","sm")}<span><b>{person("CL", "Chloé", CHLOE_LEFT)}</b> a quitté le trajet</span></span>
+<span class="sys">{i("join","sm")}<span><b>{person("TK", "Thomas")}</b> a rejoint le trajet (V)</span></span>
+<div class="bubble in">{person("IN", "Inès", cls="by who-link")}Je serai là 5 min avant demain.<small>20 h 14</small></div>
 <div class="bubble out">Parfait, j'y serai à 7 h 45.<small>Toi · 20 h 20</small></div>
 </div>
 <div class="composer"><div class="input"><input id="chat-input" maxlength="300" placeholder="Écrire aux membres du trajet…" aria-label="Message"></div><button class="btn" type="button" data-toast="Message envoyé" aria-label="Envoyer">{i("send","sm")}<span class="hide-m">Envoyer</span></button></div>
@@ -1116,15 +1419,18 @@ PAGES["messages"] = dict(title="Messages", mtitle="Messages", back="index", sub=
 <aside class="card tight members">
 <h3>Membres du trajet</h3>
 <div class="list">
-<div class="li"><span class="avatar sm">LM</span><div class="grow"><b>Léa M.</b><span>Conductrice · {stars("4,9")}</span></div><button class="iconbtn flag" type="button" data-open="signaler-compte" aria-label="Signaler Léa" title="Signaler Léa">{i("flag","sm")}</button></div>
-<div class="li"><span class="avatar sm">IN</span><div class="grow"><b>Inès N.</b><span>Passagère · J V</span></div><button class="iconbtn flag" type="button" data-open="signaler-compte" aria-label="Signaler Inès" title="Signaler Inès">{i("flag","sm")}</button></div>
-<div class="li"><span class="avatar sm">TK</span><div class="grow"><b>Thomas K.</b><span>Passager · V</span></div><button class="iconbtn flag" type="button" data-open="signaler-compte" aria-label="Signaler Thomas" title="Signaler Thomas">{i("flag","sm")}</button></div>
+{person_row("LM", f'Conductrice · {stars("4,9")}')}
+{person_row("IN", "Passagère · J V")}
+{person_row("TK", "Passager · V")}
 <div class="li"><span class="avatar sm">MD</span><div class="grow"><b>Toi</b><span>Passager · L J V</span></div></div>
 </div>
+<h3 class="sub-h">Anciens membres</h3>
+<div class="list">{person_row("CL", "A quitté le trajet le 23 sept.", CHLOE_LEFT)}</div>
+<p class="small muted">Touche une personne pour voir son profil ou la signaler.</p>
 <button class="btn sm danger block" type="button" data-open="annuler">{i("leave","sm")}Quitter ce trajet</button>
 </aside>
 </div>
-''', modals=M_SIGNALER_COMPTE + M_ANNULER)
+''', modals=M_PROFIL + M_SIGNALER_COMPTE + M_ANNULER)
 
 # ================================================================== PROFIL
 voiture = modal("voiture", f'''
@@ -1141,7 +1447,7 @@ voiture = modal("voiture", f'''
 </div>
 <div data-step hidden>{success("Voiture ajoutée", "Tu peux maintenant la choisir en publiant un trajet.")}</div>
 ''')
-PAGES["publier"]["modals"] = voiture
+PAGES["publier"]["modals"] += voiture
 creneau = modal("creneau", f'''
 <div data-step>
 {dhead("Ajouter un créneau", "Tes horaires types servent à te proposer des trajets compatibles.", "clock")}
@@ -1185,6 +1491,50 @@ delete = modal("supprimer-compte", f'''
 ''')
 slots = [("Lundi", "8 h 30", "17 h 30"), ("Mardi", "8 h 30", "18 h 00"), ("Jeudi", "9 h 45", "17 h 45"), ("Vendredi", "8 h 30", "12 h 30")]
 slot_rows = "".join(f'<tr><td><b>{d}</b></td><td class="num">{a}</td><td class="num">{b}</td><td style="text-align:right;white-space:nowrap"><button class="iconbtn" type="button" data-open="creneau" aria-label="Modifier {d}" title="Modifier" style="width:34px;height:34px">{i("edit","sm")}</button> <button class="iconbtn" type="button" data-toast="Créneau du {d.lower()} supprimé" data-remove="tr" aria-label="Supprimer {d}" title="Supprimer" style="width:34px;height:34px;color:var(--danger)">{i("trash","sm")}</button></td></tr>' for d, a, b in slots)
+# Notifications (Profil) : une ligne par événement, selon les fonctionnalités ; deux canaux (appli, e-mail universitaire).
+# (titre, description, appli, e-mail) ; appli None = notification obligatoire, « Toujours activée ».
+NOTIFS = [
+    ("Mes demandes", [
+        ("Demande acceptée", "Ta place est confirmée, la conversation du trajet s'ouvre", True, True),
+        ("Demande refusée", "Ta demande n'a pas été retenue", True, False)]),
+    ("Trajets que je conduis ou organise", [
+        ("Nouvelle demande", "Quelqu'un demande à rejoindre ton trajet", True, True),
+        ("Demande sans réponse", "Rappel quand une demande attend ta réponse depuis 12 h", True, False),
+        ("Place annulée ou demande retirée", "Un passager ou un participant se retire", True, False)]),
+    ("Mes trajets", [
+        ("Rappel 30 min avant le départ", "Heure et point de montée", True, False),
+        ("Trajet modifié", "Horaire, étape ou point de rendez-vous changé", True, True),
+        ("Trajet annulé", "Par le conducteur ou l'organisateur", None, None)]),
+    ("Messagerie", [
+        ("Nouveau message", "Dans la conversation d'un de tes trajets", True, False)]),
+    ("Après le trajet", [
+        ("Trajet à noter", "Rappel pour noter le conducteur ou les passagers", True, False)]),
+    ("Suggestions", [
+        ("Nouveau trajet compatible", "Un trajet correspond à ta zone de départ et à tes horaires types", False, False)]),
+    ("Compte et sécurité", [
+        ("Suivi de mes signalements", "Décision de la modération sur un signalement que tu as envoyé", True, True),
+        ("Avertissement ou suspension", "Décision de la modération sur ton compte", None, None),
+        ("Mes données", "Export prêt, suppression du compte", None, None)]),
+]
+
+def notif_toggle(title, canal, on):
+    return (f'<button class="toggle{" on" if on else ""}" type="button" aria-pressed="{"true" if on else "false"}" '
+            f'aria-label="{H.escape(title)} · {canal}"></button>')
+
+def notif_row(title, desc, app, mail):
+    txt = f'<div><b>{title}</b><span>{desc}</span></div>'
+    if app is None:
+        return f'<div class="notif-row">{txt}<span class="notif-lock">{i("lock","sm")}Toujours activée</span></div>'
+    return f'<div class="notif-row">{txt}{notif_toggle(title, "appli", app)}{notif_toggle(title, "e-mail", mail)}</div>'
+
+NOTIF_CARD = ('<section class="card">'
+              '<div class="card-head"><div><h2>Notifications</h2><p class="small muted">Choisis comment être prévenu : dans l\'appli ou par e-mail '
+              'sur ton adresse universitaire. Les notifications liées à la sécurité de tes trajets et de ton compte restent toujours activées.</p></div></div>'
+              '<div class="notif">'
+              + "".join(f'<div class="notif-head"><h3>{g}</h3><span>Appli</span><span>E-mail</span></div>' + "".join(notif_row(*r) for r in rows)
+                        for g, rows in NOTIFS)
+              + '</div></section>')
+
 PAGES["profil"] = dict(title="Profil", mtitle="Profil", body=f'''
 <div class="split">
 <div class="stack-lg">
@@ -1195,11 +1545,6 @@ PAGES["profil"] = dict(title="Profil", mtitle="Profil", body=f'''
 <div class="field"><span class="label">Zone de départ habituelle</span>{select("pr-zone", "Noisy-le-Grand · Mont d'Est", "pin", dyn="dep")}</div>
 <div class="field"><span class="label">Point d'arrivée habituel</span>{select("pr-campus", "Cité Descartes · Copernic", "pin", dyn="arr")}</div>
 </div>
-</section>
-<section class="card">
-<div class="card-head"><div><h2>Mes modes de déplacement</h2><p class="small muted">Comment viens-tu au campus ? Sert aux statistiques anonymisées de l'université et à te proposer les bons trajets.</p></div></div>
-<div class="row modechips">{"".join(f'<button class="chip mchip m-{m}{" on" if m in ("car", "bike", "transit") else ""}" data-toggle type="button" aria-pressed="{"true" if m in ("car", "bike", "transit") else "false"}">{i(ic,"sm")}{lbl}</button>' for m, (lbl, ic) in MODES.items())}</div>
-<div class="field"><span class="label">Mode principal</span><div class="seg" data-single>{"".join(f'<button type="button"{ACT.replace("active", "on") if m == "car" else ""}>{"Transports" if m == "transit" else lbl}</button>' for m, (lbl, ic) in MODES.items())}</div></div>
 </section>
 <section class="card">
 <div class="card-head"><h2>Horaires types</h2><button class="btn sm" type="button" data-open="creneau">{i("plus","sm")}Ajouter un créneau</button></div>
@@ -1219,9 +1564,8 @@ PAGES["profil"] = dict(title="Profil", mtitle="Profil", body=f'''
 <span class="hint">Coche ou décoche d'un tap. Ces préférences sont comparées aux tags des trajets pour te proposer les plus compatibles.</span></div>
 <div class="divider"></div>
 <div class="optline"><span>Uniquement des trajets avec des étudiants de ma composante</span><button class="toggle" type="button" aria-pressed="false" aria-label="Ma composante uniquement"></button></div>
-<div class="optline"><span>Notifications de nouvelles demandes</span><button class="toggle on" type="button" aria-pressed="true" aria-label="Notifications de demandes"></button></div>
-<div class="optline"><span>Rappel 30 min avant le départ</span><button class="toggle on" type="button" aria-pressed="true" aria-label="Rappel de départ"></button></div>
 </section>
+{NOTIF_CARD}
 <section class="card">
 <h2>Confidentialité et données</h2>
 <p class="small muted">U-Mobility applique le RGPD : tu peux consulter, exporter ou effacer tes données à tout moment.</p>
@@ -1260,11 +1604,11 @@ rgpd_key = "".join(f'<div class="stat"><span class="k">{i(ic,"sm")}{k}</span><b>
 ])
 RGPD_DATA = [  # icône, donnée, exemples, finalité, base légale (article 6 du RGPD)
     ("user", "Identité universitaire", "Prénom, nom, e-mail universitaire, formation, campus", "Créer ton compte et vérifier que tu fais partie de l'université", "Mission d'intérêt public (6.1.e)"),
-    ("route", "Trajets", "Zones de départ, d'arrêt et d'arrivée, horaires, jours, mode, places", "Publier, rechercher et rejoindre des trajets", "Conditions d'utilisation (6.1.b)"),
+    ("route", "Trajets", "Zones de départ, d'étape et d'arrivée, horaires, jours, mode, places, tags, description", "Publier, rechercher et rejoindre des trajets", "Conditions d'utilisation (6.1.b)"),
     ("car", "Véhicule", "Modèle, couleur, nombre de places (jamais la plaque)", "Permettre aux passagers de reconnaître la voiture", "Conditions d'utilisation (6.1.b)"),
     ("msg", "Messages et notes", "Messages des trajets, notes sur 5 étoiles", "Organiser les trajets et entretenir la confiance", "Conditions d'utilisation (6.1.b)"),
-    ("tag", "Préférences", "Tags « Ce qui compte pour moi », horaires types, modes de déplacement", "Te proposer les trajets les plus compatibles", "Consentement (6.1.a)"),
-    ("flag", "Signalements", "Motif, détails, décision de modération", "Protéger les membres, traiter les abus", "Mission d'intérêt public (6.1.e)"),
+    ("tag", "Préférences", "Tags « Ce qui compte pour moi », horaires types", "Te proposer les trajets les plus compatibles", "Consentement (6.1.a)"),
+    ("flag", "Signalements", "Motif, faits décrits, images et messages joints, décision de modération", "Protéger les membres, traiter les abus", "Mission d'intérêt public (6.1.e)"),
     ("chart", "Statistiques", "Trajets et modes, agrégés et anonymisés", "Plan de mobilité de l'université, CO₂ évité", "Mission d'intérêt public (6.1.e)"),
     ("lock", "Journaux de connexion", "Date, heure, adresse IP", "Sécurité du service", "Obligation légale (6.1.c)"),
 ]
@@ -1279,7 +1623,7 @@ rgpd_never = "".join(f'<div class="li"><span class="sr-ico ok">{i(ic,"sm")}</spa
 rgpd_who = "".join(f'<div class="li"><span class="sr-ico {c}">{i(ic,"sm")}</span><div class="grow"><b>{t}</b><span>{d}</span></div></div>' for c, ic, t, d in [
     ("w-all", "users", "Tous les membres U-Mobility", "Ton prénom et l'initiale de ton nom, ta formation, ton campus, ta note moyenne et les trajets que tu publies."),
     ("w-trip", "car", "Les membres de tes trajets", "En plus : ton nom complet (si tu l'autorises), le point de rendez-vous exact et la messagerie du trajet. Une demande en attente ne donne accès à rien de tout ça."),
-    ("w-mod", "flag", "L'équipe de modération", "Seulement le dossier d'un signalement : le trajet et les messages concernés. Chaque consultation est journalisée."),
+    ("w-mod", "flag", "L'équipe de modération", "Seulement le dossier d'un signalement : le motif, les faits décrits, et les images et messages que la personne qui signale a choisi de joindre. Jamais d'accès libre aux conversations. Chaque consultation est journalisée."),
     ("w-admin", "chart", "Les administrateurs", "Des statistiques anonymisées : aucun groupe de moins de 10 personnes n'est affiché."),
 ])
 rgpd_keep = "".join(f'<tr><td><b>{d}</b></td><td>{t}</td></tr>' for d, t in [
@@ -1287,7 +1631,7 @@ rgpd_keep = "".join(f'<tr><td><b>{d}</b></td><td>{t}</td></tr>' for d, t in [
     ("Trajets et historique", "1 an après la date du trajet, puis anonymisés pour les statistiques."),
     ("Messages", "6 mois après la fin du trajet (ou de la période d'un trajet régulier)."),
     ("Notes", "Ta note moyenne tant que ton compte existe ; le détail des notes 1 an."),
-    ("Signalements", "1 an après la décision de modération."),
+    ("Signalements", "1 an après la décision de modération, images et messages joints compris (leurs métadonnées, dont la position, sont retirées dès l'envoi)."),
     ("Journaux de connexion", "1 an, comme l'exige la loi."),
     ("Après suppression du compte", "Effacement sous 30 jours, sauf les journaux et un signalement en cours d'examen."),
 ])
@@ -1396,9 +1740,18 @@ PAGES["moderation"] = dict(title="Signalements", roles=("mod", "admin"), mtitle=
 <div class="notice">{i("lock")}<span>Les comptes sont pseudonymisés. L'identité ne s'affiche qu'à la demande dans le dossier, et chaque consultation est journalisée.</span></div>
 ''', modals=modal("signalement", f'''
 <div class="dialog-head"><span class="ico red">{i("flag")}</span><div class="grow"><h2>Signalement #247</h2><p class="muted">Compte · Absence au rendez-vous · reçu aujourd'hui 8 h 40</p></div><button class="iconbtn" type="button" data-close aria-label="Fermer">{i("x","sm")}</button></div>
-<div class="recap"><div class="between small"><span class="muted">Compte signalé</span><b>Compte #3481</b></div><div class="between small"><span class="muted">Signalé par</span><b>Compte #0917 (passager)</b></div><div class="between small"><span class="muted">Trajet concerné</span><b>Noisy → Copernic · 23 sept.</b></div><div class="between small"><span class="muted">Note moyenne du compte</span>{stars("3,1", 14)}</div></div>
+<div class="recap"><div class="between small"><span class="muted">Compte signalé</span><b>Compte #3481</b></div><div class="between small"><span class="muted">Signalé par</span><b>Compte #0917 (passager)</b></div><div class="between small"><span class="muted">Fiabilité du déclarant</span><span class="badge ok">{i("check","sm")}3 signalements · 3 fondés</span></div><div class="between small"><span class="muted">Trajet concerné</span><b>Noisy → Copernic · 23 sept.</b></div><div class="between small"><span class="muted">Note moyenne du compte</span>{stars("3,1", 14)}</div></div>
 <button class="linkbtn" type="button" data-toast="Identité affichée · consultation journalisée">{i("eye","sm")}Afficher l'identité (journalisé)</button>
-<div class="field"><span class="label">Message du signalement</span><p class="small" style="background:var(--surface);padding:12px;border-radius:8px">« Le conducteur n'est pas venu et ne répond pas dans la messagerie. C'est la 2e fois. »</p></div>
+<div class="field"><span class="label">Faits décrits</span><p class="small" style="background:var(--surface);padding:12px;border-radius:8px">« Le conducteur n'est pas venu et ne répond pas dans la messagerie. C'est la 2e fois. »</p></div>
+<div class="field"><span class="label">Images jointes <span class="muted" style="font-weight:400">(2)</span></span><ul class="uploads ro">{up_thumb("capture-1.jpg", "t1", ro=True)}{up_thumb("capture-2.jpg", "t2", ro=True)}</ul></div>
+<div class="field"><span class="label">Messages joints par le déclarant</span>
+<div class="chat quoted">
+<span class="daysep">Mar. 23 sept.</span>
+<div class="bubble in"><span class="by">Compte #0917 · déclarant</span>Je suis au Mont d'Est, tu arrives ?<small>7 h 48</small></div>
+<div class="bubble in"><span class="by">Compte #0917 · déclarant</span>Toujours personne, je prends le RER.<small>8 h 02</small></div>
+<span class="sys">{i("info","sm")}<span>Aucune réponse du compte #3481 avant le 24 sept.</span></span>
+</div>
+<span class="hint">Conversation du trajet Noisy → Copernic, 30 derniers jours, jointe par la personne qui signale. Comptes pseudonymisés.</span></div>
 <div class="field"><span class="label">Historique du compte</span><div class="list">
 <div class="li"><span class="badge wait">#239</span><div class="grow"><b>Absence au rendez-vous</b><span>18 sept. · avertissement envoyé</span></div></div>
 <div class="li"><span class="badge line">#221</span><div class="grow"><b>Retard répété</b><span>9 sept. · classé sans suite</span></div></div>
@@ -1409,6 +1762,7 @@ PAGES["moderation"] = dict(title="Signalements", roles=("mod", "admin"), mtitle=
 <button class="btn danger-solid block" type="button" data-close data-toast="Compte #3481 suspendu 7 jours">Suspendre le compte 7 jours</button>
 <button class="btn ghost block" type="button" data-close data-toast="Trajet masqué">{i("eyeoff","sm")}Masquer le trajet concerné</button>
 <button class="btn quiet block" type="button" data-close data-toast="Signalement classé sans suite">Classer sans suite</button>
+<button class="btn quiet block red" type="button" data-close data-toast="Signalement classé abusif · avertissement envoyé au compte #0917">Classer comme abusif (avertit le déclarant)</button>
 </div>
 ''', drawer=True))
 
@@ -1457,7 +1811,7 @@ PAGES["back-office"] = dict(title="Back office · statistiques", roles=("admin",
 <div class="table-wrap">{peak}</div>
 </section>
 <section class="card">
-<div class="card-head"><div><h2>Part modale déclarée</h2><p class="small muted">Modes cochés dans « Mes modes de déplacement » (plusieurs choix possibles) · 1 284 profils</p></div></div>
+<div class="card-head"><div><h2>Part modale des trajets</h2><p class="small muted">Mode des trajets réalisés ce mois, publiés et rejoints · 3 412 trajets</p></div></div>
 <div class="stack">{hbars([("Voiture", 46, "car"), ("Transports en commun", 38, "transit"), ("Vélo", 11, "bike"), ("À pied", 5, "walk")], " %", 50)}</div>
 </section>
 <div class="grid-2">
@@ -1479,28 +1833,36 @@ PLAN = [
                    ("suspendu.html#contester", "Popup · contester la suspension", "")]),
     ("Utilisateur", "user", [
         ("index.html", "Tableau de bord", "Activité façon GitHub, prochains trajets, trajets à noter"),
-        ("recherche.html", "Rechercher un trajet", "Modes de déplacement, zones du campus, tags, filtres"),
-        ("trajet.html", "Détail du trajet (passager)", "Notes sans avis, demandes en attente"),
-        ("trajet.html#demande", "Popup · demande pour rejoindre", "Jours, places, message facultatif"),
-        ("trajet.html#signaler", "Popup · signaler un trajet", ""),
-        ("trajet.html#membre", "Détail du trajet (passager confirmé)", "Tes jours, point de rendez-vous, annuler ma place"),
-        ("trajet.html#velo", "Détail d'un trajet à vélo", "Sans prix ni limite de places, couleur du mode"),
-        ("mon-trajet.html", "Mon trajet (conducteur)", "Passagers, demandes à accepter ou refuser"),
+        ("recherche.html", "Rechercher un trajet", "Modes de déplacement, zones du campus, tags, filtres repliés en mobile, pagination"),
+        ("recherche.html#filtres", "Rechercher · filtres ouverts (mobile)", ""),
+        ("trajet.html", "Détail du trajet (passager)", "Notes sans avis, temps de réponse du conducteur"),
+        ("trajet.html#demande", "Popup · demande pour rejoindre", "Jours, point de montée, places, message ; temps de réponse moyen"),
+        ("trajet.html#signaler", "Popup · signaler un trajet", "Faits obligatoires, images (5 au plus), engagement"),
+        ("trajet.html#membre", "Détail du trajet (passager confirmé)", "Bandeau place confirmée, tes jours, point de rendez-vous"),
+        ("trajet.html#velo", "Détail d'un trajet à vélo", "Participant, sans prix ni limite de places"),
+        ("trajet.html#pied", "Détail d'un trajet à pied (vue publique)", "Demander à rejoindre, sans prix ni limite de places"),
+        ("trajet.html#demande-pied", "Popup · demande pour rejoindre (à pied)", "Jours, message ; ni places ni prix"),
+        ("mon-trajet.html", "Mon trajet (conducteur)", "Passagers, demandes sans refus automatique"),
+        ("mon-trajet.html#a-pied", "Mon trajet à pied (organisateur)", "Participants, demandes à accepter / refuser"),
         ("mon-trajet.html#annuler-trajet", "Popup · annuler le trajet (conducteur)", ""),
+        ("mon-trajet.html#annuler-pied", "Popup · annuler le trajet à pied", ""),
         ("mon-trajet.html#signaler-compte", "Popup · signaler un passager", ""),
-        ("publier.html", "Publier un trajet", "Voiture, vélo, à pied ou transports ; 2 arrêts au plus ; tags facultatifs"),
+        ("publier.html", "Publier un trajet", "Vers ou depuis le campus ; voiture, vélo, à pied ou transports ; 2 étapes au plus ; tags ; description"),
+        ("publier.html#confirmer", "Popup · confirmer la publication", "Récapitulatif puis « Ton trajet est en ligne »"),
         ("publier.html#voiture", "Popup · ajouter une voiture", ""),
-        ("mes-trajets.html", "Mes trajets", "Trajets à venir des deux rôles, annulation claire"),
+        ("mes-trajets.html", "Mes trajets", "Mes trajets acceptés puis Mes demandes, bascule À venir / Historique en mobile"),
         ("mes-trajets.html#annuler", "Popup · annuler ma place", ""),
         ("mes-trajets.html#annuler-trajet", "Popup · annuler le trajet", ""),
-        ("historique.html", "Historique", "Trajets à noter, statistiques, trajets fréquents"),
+        ("historique.html", "Historique", "Bascule À venir / Historique, trajets à noter, statistiques"),
         ("historique.html#noter-conducteur", "Popup · noter le conducteur", "5 étoiles, sans texte"),
         ("historique.html#noter-passagers", "Popup · noter les passagers", "5 étoiles, sans texte"),
         ("historique.html#signaler-compte", "Popup · signaler un compte", ""),
-        ("messages.html", "Messagerie du trajet", "Messages système, membres"),
-        ("messages.html#signaler-compte", "Popup · signaler un compte", ""),
+        ("messages.html", "Messagerie du trajet", "Messages système, membres et anciens membres cliquables"),
+        ("messages.html#profil", "Popup · profil d'une personne", "Note, trajets, signaler (ici une ancienne membre)"),
+        ("messages.html#signaler-profil", "Popup · signaler depuis un profil", "La personne est déjà choisie : pas de liste"),
+        ("messages.html#signaler-compte", "Popup · signaler un compte (en-tête)", "Choix du membre, une note suffit ?, faits, images, messages joints, engagement"),
         ("messages.html#annuler", "Popup · quitter le trajet", ""),
-        ("profil.html", "Profil", "Campus et zones, modes, créneaux, véhicules, tags, RGPD"),
+        ("profil.html", "Profil", "Campus et zones, créneaux, véhicules, tags, notifications, RGPD"),
         ("profil.html#creneau", "Popup · ajouter un créneau", ""),
         ("profil.html#modifier-profil", "Popup · modifier le profil", ""),
         ("profil.html#voiture", "Popup · ajouter une voiture", ""),
@@ -1510,7 +1872,7 @@ PLAN = [
         ("donnees.html#exercer-droits", "Popup · exercer mes droits", "Demande au DPO"),
         ("index.html#loader", "Loader", "Chargement entre les pages"),
     ]),
-    ("Modérateur", "mod", [("moderation.html", "Signalements", "Réservé aux modérateurs et administrateurs"), ("moderation.html#signalement", "Dossier de signalement", "Panneau latéral")]),
+    ("Modérateur", "mod", [("moderation.html", "Signalements", "Réservé aux modérateurs et administrateurs"), ("moderation.html#signalement", "Dossier de signalement", "Images et messages joints, fiabilité du déclarant")]),
     ("Administrateur", "admin", [("back-office.html", "Back office · statistiques", "Statistiques anonymisées, part modale, filtre par campus"), ("moderation.html", "Signalements (vue admin)", "Même page, navigation administrateur")]),
 ]
 plan_html = ""
@@ -1547,11 +1909,10 @@ LOADER = f'''<div class="loader" id="loader" role="status" aria-live="polite"><d
 <p>Chargement…</p></div></div>'''
 
 
-# Avatars : une couleur secondaire UGE stable par personne, calculée sur les initiales (classes av0…av6).
-import re, zlib
+# Avatars : une couleur secondaire UGE stable par personne, calculée sur les initiales (classes av0…av6, av_cls()).
 AVATAR_RE = re.compile(r'class="avatar((?: xs| sm| lg)?)(?: b| l)? ?"([^>]*)>([A-ZÉ]{2})<')
 def color_avatars(h):
-    return AVATAR_RE.sub(lambda m: f'class="avatar{m.group(1)} av{zlib.crc32(("u-mobility" + m.group(3)).encode()) % 7}"{m.group(2)}>{m.group(3)}<', h)
+    return AVATAR_RE.sub(lambda m: f'class="avatar{m.group(1)} {av_cls(m.group(3))}"{m.group(2)}>{m.group(3)}<', h)
 
 # Espaces insécables : « 7 h 50 », « 2,50 € », « 1,4 kg » ne se coupent jamais en fin de ligne.
 NB_RE = [(re.compile(r"(\d) h (\d)"), "\\1\u00a0h\u00a0\\2"), (re.compile(r"(\d) (h|€|kg|km|t|%)(?=[\s<.,)·/])"), "\\1\u00a0\\2")]

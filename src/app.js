@@ -56,12 +56,81 @@
     var steps = $$('[data-step]', m);
     if (steps.length) steps.forEach(function (s, k) { s.hidden = k !== 0; });
     m.classList.add('open');
+    $$('[data-guard]', m).forEach(guard);
     // Focus sur le premier champ (ou le bouton principal), pas sur « Fermer »
     var f = $('[data-step]:not([hidden]) input, [data-step]:not([hidden]) textarea', m) || $('input, textarea', m) || $('.dialog-foot .btn:not([data-close]), .btn:not([data-close])', m);
     if (f && f.focus) { try { f.focus({ preventScroll: true }); } catch (e) {} }
     return true;
   }
   function closeModals() { $$('.modal.open, .drawer.open').forEach(function (m) { m.classList.remove('open'); }); }
+
+  /* ---------- Envoi bloqué tant que le formulaire est incomplet (signalements) ---------- */
+  // [data-guard] : étape ; [data-req] : case à cocher obligatoire, ou champ de data-req caractères au moins ; [data-guarded] : bouton d'envoi.
+  function guard(step) {
+    var ok = $$('[data-req]', step).every(function (x) {
+      if (x.type === 'checkbox') return x.checked;
+      return x.value.trim().length >= parseInt(x.getAttribute('data-req') || '1', 10);
+    });
+    $$('[data-guarded]', step).forEach(function (b) { b.disabled = !ok; });
+  }
+
+  /* ---------- Mini-profil d'une personne (#m-profil), rempli avec le data-person cliqué ---------- */
+  // data-person : nom|initiales|couleur|formation|note|trajets|réponse|mention|ensemble (person_data() dans build.py)
+  function setAvatar(av, d) { av.textContent = d[1]; av.className = av.className.replace(/\bav\d\b/, '').trim() + ' ' + d[2]; }
+  function fillPerson(el) {
+    var data = el.getAttribute('data-person'), d = data.split('|'), m = document.getElementById('m-profil');
+    if (!m) return;
+    var f = function (k) { return $('[data-p="' + k + '"]', m); };
+    f('name').textContent = d[0]; f('sub').textContent = d[3]; f('rate').textContent = d[4]; f('trips').textContent = d[5];
+    setAvatar(f('ini'), d);
+    [['reply', d[6] ? 'Répond en moyenne en ' + d[6] : ''], ['note', d[7]], ['together', d[8]]].forEach(function (x) {
+      var b = f(x[0]); if (!b) return; b.hidden = !x[1]; b.querySelector('span').textContent = x[1];
+    });
+    // « Signaler ce compte » visera cette personne
+    var rep = $('[data-open="signaler-compte"]', m);
+    if (rep) { rep.setAttribute('data-person', data); rep.setAttribute('aria-label', 'Signaler le compte de ' + d[0]); }
+  }
+
+  /* ---------- Signaler un compte : depuis une personne (data-person), elle est déjà choisie et la liste disparaît ---------- */
+  function reportTarget(data) {
+    var m = document.getElementById('m-signaler-compte');
+    if (!m) return;
+    var tg = $('.report-target', m), pick = $('.report-pick', m);
+    tg.hidden = !data; pick.hidden = !!data;
+    if (!data) return;
+    var d = data.split('|');
+    setAvatar($('[data-r="ini"]', tg), d);
+    $('[data-r="name"]', tg).textContent = d[0]; $('[data-r="sub"]', tg).textContent = d[3];
+  }
+
+  /* ---------- Images d'un signalement : 5 au plus, ajout et retrait ---------- */
+  var upUid = 2;
+  function uploadAction(el) {
+    var box = el.closest('.up-field'), list = $('.uploads', box), max = parseInt(box.getAttribute('data-max') || '5', 10);
+    if (el.getAttribute('data-upload') === 'add') {
+      var n = $$('.up', list).length; if (n >= max) return;
+      var li = $('.up-tpl', box).content.firstElementChild.cloneNode(true), name = 'capture-' + (++upUid) + '.jpg';
+      li.className = 'up t' + (n % 3 + 1);
+      $('.up-name', li).textContent = name; $('.up-img', li).setAttribute('aria-label', 'Image ' + name);
+      $('.up-del', li).setAttribute('aria-label', 'Retirer ' + name);
+      list.insertBefore(li, $('.up-add-li', list)); toast('Image ajoutée');
+    } else { el.closest('.up').remove(); toast('Image retirée'); }
+    var k = $$('.up', list).length, add = $('.up-add', box), full = k >= max;
+    $('.tp-count b', box).textContent = k;
+    add.disabled = full; $('span', add).textContent = full ? max + ' images maximum' : 'Ajouter';
+    if (!full) add.focus();
+  }
+
+  /* ---------- Groupes data-show / data-when ---------- */
+  // data-show="x" ou "groupe:x" : n'affecte que les data-when du même groupe (ex. mode:car / regulier / sens:aller)
+  function applyShow(scope, grp, sw) {
+    $$('[data-when]', scope).forEach(function (x) {
+      var w = x.getAttribute('data-when').split(' ');
+      if ((w[0].indexOf(':') > 0 ? w[0].split(':')[0] + ':' : '') !== grp) return;
+      x.hidden = w.indexOf(sw) < 0;
+    });
+  }
+  function setModeClass(el, mode) { el.className = el.className.replace(/\bm-[a-z]+\b/g, '').trim() + ' m-' + mode; }
 
   /* ---------- Tabs ---------- */
   function activateTab(name) {
@@ -98,12 +167,33 @@
     return true;
   }
 
+  /* ---------- Pagination (maquette : seule la page active change) ---------- */
+  function setPage(el) {
+    var pg = el.closest('.pager'), max = parseInt(pg.getAttribute('data-pages'), 10), cur = $('.pg-n.on', pg);
+    var n = el.getAttribute('data-page'), c = parseInt(cur.getAttribute('data-page'), 10);
+    n = n === 'prev' ? c - 1 : n === 'next' ? c + 1 : parseInt(n, 10);
+    if (n < 1 || n > max) return;
+    $$('.pg-n', pg).forEach(function (b) {
+      var on = parseInt(b.getAttribute('data-page'), 10) === n;
+      b.classList.toggle('on', on);
+      if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    });
+    $('[data-page="prev"]', pg).disabled = n === 1;
+    $('[data-page="next"]', pg).disabled = n === max;
+    var out = $('[data-page-cur]'); if (out) out.textContent = n;
+    var list = pg.closest('.stack'); if (list) list.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   /* ---------- State from hash (#demande, #conducteur, #loader…) ---------- */
   function applyState(state) {
     if (!state) return;
+    if (state === 'filtres') { $$('.collapsible').forEach(function (c) { c.classList.add('open'); var b = $('[data-collapse]', c); if (b) b.setAttribute('aria-expanded', 'true'); }); return; }
     if (state === 'loader') { var l = $('#loader'); if (l) l.classList.add('show'); return; }
+    if (state === 'signaler-profil') { var rb = $('#m-profil [data-open="signaler-compte"]'); reportTarget(rb && rb.getAttribute('data-person')); openModal('signaler-compte'); return; }
     if (applyView(state)) return;
     if (activateTab(state)) return;
+    // Popup propre à une vue (ex. #demande-pied sur la vue #pied) : la vue d'abord
+    var iv = $('#m-' + state + ' [data-in-view]'); if (iv) applyView(iv.getAttribute('data-in-view'));
     openModal(state);
   }
 
@@ -182,7 +272,13 @@
 
     if ((el = t.closest('.demobar [data-role]'))) { e.preventDefault(); switchRole(el.getAttribute('data-role')); return; }
     if ((el = t.closest('[data-set-role]'))) setRole(el.getAttribute('data-set-role')); // puis navigation normale du lien
-    if ((el = t.closest('[data-open]'))) { e.preventDefault(); e.stopPropagation(); openModal(el.getAttribute('data-open')); return; }
+    if ((el = t.closest('[data-open]'))) {
+      e.preventDefault(); e.stopPropagation();
+      var oid = el.getAttribute('data-open');
+      if (oid === 'profil' && el.hasAttribute('data-person')) fillPerson(el);
+      if (oid === 'signaler-compte') reportTarget(el.getAttribute('data-person'));
+      openModal(oid); return;
+    }
     if ((el = t.closest('[data-close]'))) { e.preventDefault(); closeModals(); if (el.hasAttribute('data-toast')) toast(el.getAttribute('data-toast')); return; }
     if (t.classList && (t.classList.contains('modal') || t.classList.contains('drawer'))) { closeModals(); return; }
     if ((el = t.closest('[data-next]'))) {
@@ -203,21 +299,19 @@
     if ((el = t.closest('[data-toast]'))) { e.preventDefault(); toast(el.getAttribute('data-toast')); if (el.hasAttribute('data-remove')) { var c = el.closest(el.getAttribute('data-remove')); if (c) { c.style.transition = 'opacity .2s'; c.style.opacity = '0'; setTimeout(function () { c.remove(); }, 200); } } return; }
     if ((el = t.closest('[data-scroll]'))) { var tg = document.getElementById(el.getAttribute('data-scroll')); if (tg) { tg.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' }); tg.setAttribute('tabindex', '-1'); tg.focus({ preventScroll: true }); } return; }
     if ((el = t.closest('[data-stop]'))) { e.preventDefault(); stopAction(el); return; }
+    if ((el = t.closest('[data-upload]'))) { e.preventDefault(); uploadAction(el); return; }
     if ((el = t.closest('[data-single] > button'))) {
       // Demande de réservation : le point de montée choisi s'affiche dans le récapitulatif
       if (el.hasAttribute('data-label')) { var bo = el.closest('.dialog, .modal') && el.closest('.dialog, .modal').querySelector('[data-board-out]'); if (bo) bo.textContent = el.getAttribute('data-label'); }
       $$('button', el.parentNode).forEach(function (b) { b.classList.toggle('on', b === el); if (b.hasAttribute('role')) b.setAttribute('aria-checked', b === el); });
-      // data-show="x" ou "groupe:x" : n'affecte que les data-when du même groupe (ex. mode:car / regulier)
       var sw = el.getAttribute('data-show');
       if (sw) {
         var grp = sw.indexOf(':') > 0 ? sw.split(':')[0] + ':' : '';
         // Choix du mode : la zone (formulaire + aperçu) prend la couleur du mode (classe m-car, m-bike…)
-        if (grp === 'mode:') { var sc = el.closest('.mode-scope'); if (sc) { sc.className = sc.className.replace(/\bm-[a-z]+\b/g, '').trim() + ' m-' + sw.split(':')[1]; } }
-        $$('[data-when]', (grp && el.closest('[data-show-scope]')) || el.closest('.card, .dialog, form, .content') || document).forEach(function (x) {
-          var w = x.getAttribute('data-when').split(' ');
-          if ((w[0].indexOf(':') > 0 ? w[0].split(':')[0] + ':' : '') !== grp) return;
-          x.hidden = w.indexOf(sw) < 0;
-        });
+        if (grp === 'mode:') { var sc = el.closest('.mode-scope'); if (sc) setModeClass(sc, sw.split(':')[1]); }
+        applyShow((grp && el.closest('[data-show-scope]')) || el.closest('.card, .dialog, form, .content') || document, grp, sw);
+        // Publier : la popup de confirmation (hors du formulaire) recopie les choix et la couleur du mode
+        if (el.closest('[data-show-scope]')) $$('[data-show-mirror]').forEach(function (mr) { if (grp === 'mode:') setModeClass(mr, sw.split(':')[1]); applyShow(mr, grp, sw); });
         $$('.tagpick', el.closest('[data-show-scope]') || document).forEach(syncTagpick);
       }
       return;
@@ -225,11 +319,22 @@
     if ((el = t.closest('.chip[data-toggle]'))) { el.classList.toggle('on'); el.setAttribute('aria-pressed', el.classList.contains('on')); return; }
     if ((el = t.closest('.chip[data-radio]'))) {
       $$('.chip', el.parentNode).forEach(function (b) { b.classList.toggle('on', b === el); });
-      // Filtre de liste (Mes trajets) : data-filter = classe que doivent porter les cartes ("" = toutes)
+      // Filtre de liste (Mes trajets) : data-filter = classe que doivent porter les cartes ("" = toutes) ;
+      // une section [data-filter-sec] sans carte visible est masquée
       var fl = el.parentNode.getAttribute('data-filter-list');
-      if (fl && el.hasAttribute('data-filter')) { var f = el.getAttribute('data-filter'); $$('#' + fl + ' > .trip').forEach(function (c) { c.hidden = !!f && !c.classList.contains(f); }); }
+      if (fl && el.hasAttribute('data-filter')) {
+        var f = el.getAttribute('data-filter');
+        $$('#' + fl + ' .trip').forEach(function (c) { c.hidden = !!f && !c.classList.contains(f); });
+        $$('#' + fl + ' [data-filter-sec]').forEach(function (sec) { sec.hidden = !$$('.trip', sec).some(function (c) { return !c.hidden; }); });
+      }
       return;
     }
+    if ((el = t.closest('[data-collapse]'))) {
+      var cb = el.closest('.collapsible'), op = cb.classList.toggle('open');
+      el.setAttribute('aria-expanded', op); el.setAttribute('aria-label', op ? 'Masquer les filtres' : 'Afficher les filtres');
+      return;
+    }
+    if ((el = t.closest('.pager [data-page]'))) { setPage(el); return; }
     if ((el = t.closest('.toggle'))) { el.classList.toggle('on'); el.setAttribute('aria-pressed', el.classList.contains('on')); return; }
     if ((el = t.closest('.days button'))) { if (!el.classList.contains('off')) el.classList.toggle('on'); return; }
     if ((el = t.closest('.stepper .iconbtn'))) { var b = el.parentNode.querySelector('b'), n = parseInt(b.textContent, 10) + (el.textContent.trim() === '+' ? 1 : -1); var max = parseInt(el.parentNode.getAttribute('data-max') || '8', 10); b.textContent = Math.max(1, Math.min(max, n)); return; }
@@ -267,11 +372,18 @@
   });
   document.addEventListener('input', function (e) {
     var el = e.target;
-    if (el.hasAttribute && el.hasAttribute('maxlength')) { var c = el.closest('.field') && el.closest('.field').querySelector('.counter'); if (c) c.textContent = el.value.length + ' / ' + el.getAttribute('maxlength'); }
+    if (el.hasAttribute && el.hasAttribute('maxlength')) {
+      var c = el.closest('.field') && el.closest('.field').querySelector('.counter'), min = parseInt(el.getAttribute('data-req') || '0', 10), len = el.value.trim().length;
+      if (c) c.textContent = len < min ? 'Encore ' + (min - len) + ' caractère' + (min - len > 1 ? 's' : '') : el.value.length + ' / ' + el.getAttribute('maxlength');
+    }
+    var gd = el.closest && el.closest('[data-guard]'); if (gd) guard(gd);
+    // Publier : la description saisie est recopiée dans le récapitulatif (popup #confirmer), masqué si elle est vide
+    if (el.id === 'p-desc') $$('[data-desc-out]').forEach(function (o) { o.textContent = el.value.trim(); var b = o.closest('.trip-desc'); if (b) b.hidden = !el.value.trim(); });
     var sf = el.closest && (el.closest('.stops-field') || ((el.id === 'p-dep-t' || el.id === 'p-arr-t') && $('.stops-field')));
     if (sf) syncStops(sf);
     if (el.id === 'del-confirm') { var btn = document.getElementById('del-go'); if (btn) { var ok = el.value.trim().toUpperCase() === 'SUPPRIMER'; btn.disabled = !ok; btn.classList.toggle('is-disabled', !ok); } }
   });
+  document.addEventListener('change', function (e) { var gd = e.target.closest && e.target.closest('[data-guard]'); if (gd) guard(gd); });
 
   /* ---------- Tags (catalogue fixe) ---------- */
   // Un tap coche, un tap décoche ; data-group : tags qui s'excluent ; data-max sur .tagpick : limite (Publier).
@@ -299,24 +411,24 @@
     var x = f && f.querySelector('.tp-clear'); if (x) x.hidden = !n;
   }
 
-  /* ---------- Arrêts intermédiaires (Publier) : 2 au plus, zone + heure estimée, ordonnés à la main ---------- */
+  /* ---------- Étapes (Publier) : 2 au plus, zone + heure estimée, ordonnées à la main ---------- */
   var stopUid = 0;
   function toMin(v) { var m = (v || '').match(/(\d{1,2})\s*h\s*(\d{0,2})/); return m ? +m[1] * 60 + (+m[2] || 0) : null; }
-  var STOP_LBL = { up: "Avancer l'arrêt ", down: "Reculer l'arrêt ", del: "Retirer l'arrêt " };
+  var STOP_LBL = { up: "Avancer l'étape ", down: "Reculer l'étape ", del: "Retirer l'étape " };
   function syncStops(box) {
     var rows = $$('.stops > .stop-row', box), max = parseInt(box.getAttribute('data-max') || '2', 10);
     rows.forEach(function (r, k) {
       var n = k + 1;
       r.querySelector('.stop-n').textContent = n;
-      r.querySelector('.field .label').textContent = "Zone de l'arrêt " + n;
+      r.querySelector('.field .label').textContent = "Zone de l'étape " + n;
       $$('[data-stop]', r).forEach(function (b) { b.setAttribute('aria-label', STOP_LBL[b.getAttribute('data-stop')] + n); });
       r.querySelector('[data-stop="up"]').disabled = k === 0;
       r.querySelector('[data-stop="down"]').disabled = k === rows.length - 1;
     });
     var add = $('.stop-add', box), full = rows.length >= max;
-    if (add) { add.disabled = full; add.lastChild.textContent = full ? max + ' arrêts maximum' : 'Ajouter un arrêt'; }
+    if (add) { add.disabled = full; add.lastChild.textContent = full ? max + ' étapes maximum' : 'Ajouter une étape'; }
     var c = $('.tp-count b', box); if (c) c.textContent = rows.length;
-    // Les heures suivent l'ordre du parcours : départ < arrêt 1 < arrêt 2 < arrivée
+    // Les heures suivent l'ordre du parcours : départ < étape 1 < étape 2 < arrivée
     var dep = $('#p-dep-t'), arr = $('#p-arr-t'), prev = dep ? toMin(dep.value) : null, end = arr ? toMin(arr.value) : null, bad = false;
     rows.forEach(function (r) {
       var v = toMin(r.querySelector('input').value);
@@ -337,7 +449,7 @@
       list.appendChild(li); syncStops(box);
       li.querySelector('.select > button').focus();
     } else if (act === 'del') {
-      row.remove(); syncStops(box); toast('Arrêt retiré');
+      row.remove(); syncStops(box); toast('Étape retirée');
       var b = $('.stop-add', box); if (b) b.focus();
     } else if (act === 'up' && row.previousElementSibling) {
       list.insertBefore(row, row.previousElementSibling); syncStops(box); (el.disabled ? row.querySelector('[data-stop="down"]') : el).focus();
