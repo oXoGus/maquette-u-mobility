@@ -455,9 +455,11 @@ def tabbar_html(role, act):
     return "".join(out)
 
 
-def app_page(key, title, body, roles=("user",), active=None, sub="", mtitle=None, back=None, topright=""):
+def app_page(key, title, body, roles=("user",), active=None, sub="", mtitle=None, back=None, topright="", mright=None, actionbar=""):
     """Gabarit des pages connectées. Une page peut accepter plusieurs rôles (ex. modération : modérateur et admin) :
-    la navigation de chaque rôle est rendue, app.js affiche celle du rôle choisi dans la barre de démo."""
+    la navigation de chaque rôle est rendue, app.js affiche celle du rôle choisi dans la barre de démo.
+    actionbar : barre d'action collée au-dessus des onglets en mobile (masquée en ordinateur), pour que l'action principale
+    se voie sans défiler. Elle suit .content : en fin de page, elle se pose sur la barre d'onglets."""
     act = active or key
     views, tabs = "", ""
     for k, r in enumerate(roles):
@@ -474,16 +476,18 @@ def app_page(key, title, body, roles=("user",), active=None, sub="", mtitle=None
     # Messages : icône de messagerie + nombre de non-lus (jaune = compteur), en haut à droite en mobile comme sur ordinateur
     msgbtn = f'<a class="iconbtn msgbtn" href="messages.html" aria-label="Messages, 2 non lus" title="Messages">{i("msg")}<span class="count">2</span></a>' if "user" in roles else ""
     tr = f'<div class="tr">{topright}</div>' if topright else ""
+    # mright : bouton propre à la page à droite de la barre mobile (Messages : membres de la conversation ouverte)
     return f'''<div class="app" data-roles="{" ".join(roles)}">
 <aside class="sidebar">
 {views}
 </aside>
 <main class="main">
-<header class="mobilebar">{mleft}<b>{mtitle or title}</b>{msgbtn}</header>
+<header class="mobilebar">{mleft}<b>{mtitle or title}</b>{msgbtn if mright is None else mright}</header>
 <div class="topbar"><div class="grow"><h1>{title}</h1>{f'<p class="sub">{sub}</p>' if sub else ""}</div>{tr}{msgbtn}</div>
 <div class="content">
 {body}
 </div>
+{f'<div class="actionbar hide-d">{actionbar}</div>' if actionbar else ""}
 </main>
 {tabs}
 </div>'''
@@ -677,16 +681,17 @@ PAGES["index"] = dict(title="Tableau de bord", mtitle="U-Mobility", app=None, mo
 <section class="hero compact">
 <span class="arc a1" aria-hidden="true"></span><span class="arc a2" aria-hidden="true"></span>
 <div class="stack" style="gap:6px"><h1>Bonjour Mathis, où vas-tu aujourd'hui ?</h1>
-<p>Prochain trajet demain à 7 h 50, de Noisy-le-Grand · Mont d'Est à Copernic. 2 passagers attendent ta réponse pour vendredi.</p></div>
+<p>Prochain trajet demain à 7 h 50, de Noisy-le-Grand · Mont d'Est à Copernic. <a class="hero-link" href="mon-trajet.html">2 passagers attendent ta réponse</a> pour vendredi.</p></div>
 <div class="cta"><a class="btn light" href="recherche.html">{i("search","sm")}Rechercher</a><a class="btn secondary" href="publier.html">{i("plus","sm")}<span>Publier<span class="hide-m"> un trajet</span></span></a></div>
 </section>
 <div class="split">
-<section class="stack">
+<section class="stack upcoming">
 <div class="card-head"><h2>Mes prochains trajets</h2><a class="more" href="mes-trajets.html">Tout voir{i("chevr","sm")}</a></div>
 {trip("Demain · jeu. 25 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 1, 3, 2, "Léa M.", "4,9", 38, ("Non-fumeur", "Musique"), board="Mont d'Est · 7 h 50", role="p", pax=["MD", "IN"], href="trajet.html#membre", stops=LEA_STOPS)}
 {trip("Ven. 26 sept.", "L M J V", "7 h 50", "Noisy-le-Grand · Mont d'Est", "8 h 20", "Cité Descartes · Copernic", "2,50 €", 2, 3, 2, "Toi", "", None, ("Non-fumeur",), role="d", pax=["CL"], stops=MY_STOPS)}
 {trip("Ven. 26 sept.", "Ponctuel", "17 h 45", "Cité Descartes · Bienvenüe", "18 h 10", "Torcy · Centre", "3,00 €", 2, 3, 0, "Yanis B.", "4,7", 12, ("Bagages",), role="p", pax=["HP"], sent=True, reply=YANIS_REPLY)}
 {trip("Lun. 29 sept.", "L J", "17 h 30", "Cité Descartes · Copernic", "17 h 50", "Noisy-Champs · Gare RER A", "", 0, 0, 0, "Amina S.", "5,0", 22, ("Calme",), role="p", pax=["AS", "MD", "PR", "CL", "HP"], mode="bike", href="trajet.html#velo")}
+<a class="btn ghost block hide-d" href="mes-trajets.html">Voir mes 4 trajets à venir{i("chevr","sm")}</a>
 </section>
 <aside class="stack-lg">
 <section class="card">
@@ -719,8 +724,12 @@ PAGER = ('<nav class="pager" aria-label="Pages de résultats" data-pages="4">'
          f'<button type="button" class="pg-step" data-page="prev" aria-label="Page précédente" disabled>{i("back", "sm")}<span class="hide-m">Précédent</span></button>'
          + "".join(f'<button type="button" class="pg-n{" on" if n == 1 else ""}" data-page="{n}" aria-label="Page {n}"{CUR if n == 1 else ""}>{n}</button>' for n in range(1, 5))
          + f'<button type="button" class="pg-step" data-page="next" aria-label="Page suivante"><span class="hide-m">Suivant</span>{i("chevr", "sm")}</button></nav>')
+# Mobile : le formulaire se replie en un résumé (« Modifier » l'ouvre, ancre #modifier) pour que les résultats se voient sans défiler.
 PAGES["recherche"] = dict(title="Rechercher un trajet", mtitle="Rechercher", modals="", body=f'''
-<section class="card">
+<section class="card collapsible search-card" data-state="modifier">
+<div class="search-sum hide-d"><span class="ico">{i("search","sm")}</span><div class="grow"><b>Mont d'Est → Copernic</b><span>Ponctuel · ven. 26 sept. · arriver avant 8 h 30</span></div>
+<button class="btn sm ghost" type="button" data-collapse="Modifier|Replier" aria-expanded="false" aria-controls="s-form">{i("edit","sm")}<span>Modifier</span></button></div>
+<div class="collapse-body" id="s-form">
 <div class="between search-top"><div class="seg" data-single><button type="button" class="on">Ponctuel</button><button type="button">Régulier</button></div>
 <span class="small muted campus-line hide-m">{i("campus","sm")}Campus <b data-campus-name>{CAMPUS}</b> · <a href="profil.html">changer</a></span></div>
 <div class="field"><span class="label">Modes de déplacement</span><div class="row modechips">{"".join(f'<button class="chip mchip m-{m} on" data-toggle type="button" aria-pressed="true">{i(ic,"sm")}{lbl}</button>' for m, (lbl, ic) in MODES.items())}</div></div>
@@ -734,10 +743,11 @@ PAGES["recherche"] = dict(title="Rechercher un trajet", mtitle="Rechercher", mod
 <div class="between"><p class="small muted">{i("info","sm")} Les zones de départ et d'arrivée sont définies par l'université.</p>
 <div class="row"><span class="label" id="s-seats-l">Places minimum <span class="muted" style="font-weight:400">(voiture)</span></span><div class="stepper" data-max="3" role="group" aria-labelledby="s-seats-l"><button class="iconbtn" type="button" aria-label="Moins">−</button><b>1</b><button class="iconbtn" type="button" aria-label="Plus">+</button></div>
 <button class="btn" type="button" data-loadtoast="24 trajets compatibles trouvés">{i("search","sm")}Rechercher</button></div></div>
+</div>
 </section>
 <div class="split-left">
-<aside class="card collapsible">
-<div class="card-head"><h2>Filtres</h2><div class="row" style="gap:8px"><button class="linkbtn" type="button" data-toast="Filtres réinitialisés">Réinitialiser</button><button class="iconbtn hide-d" type="button" data-collapse aria-expanded="false" aria-controls="s-filters" aria-label="Afficher les filtres">{i("chev","sm")}</button></div></div>
+<aside class="card collapsible" data-state="filtres">
+<div class="card-head"><h2>Filtres</h2><div class="row" style="gap:8px"><button class="linkbtn" type="button" data-toast="Filtres réinitialisés">Réinitialiser</button><button class="iconbtn hide-d" type="button" data-collapse="Afficher les filtres|Masquer les filtres" aria-expanded="false" aria-controls="s-filters" aria-label="Afficher les filtres">{i("chev","sm")}</button></div></div>
 <div class="collapse-body" id="s-filters">
 <div class="field">{tp_head("Tags", PREFS, clear=True)}{tagpick("s-tags", PREFS, flat=True)}
 <span class="hint">Tes préférences du profil sont précochées.</span></div>
@@ -801,7 +811,15 @@ REPORT_SENT = success("Signalement envoyé", "L'équipe de modération l'examine
 # ================================================================== DÉTAIL DU TRAJET
 dist = [("5 ★", 31), ("4 ★", 6), ("3 ★", 1), ("2 ★", 0), ("1 ★", 0)]
 dist_html = "".join(f'<div><span>{k}</span><span class="t"><i style="width:{v / 38 * 100:.0f}%"></i></span><b>{v}</b></div>' for k, v in dist)
-PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back="recherche", active="recherche", body=f'''
+# Mobile : l'action principale de chaque vue reste collée en bas (actionbar), dans la couleur du mode.
+MSG_BTN = f'<a class="btn" href="messages.html#conversation">{i("msg","sm")}Messagerie du trajet</a>'
+TRAJET_BAR = (f'<div class="ab mode-scope m-car" data-view="public"><span class="price">2,50 € <small>/ passager</small></span>'
+              f'<button class="btn secondary" type="button" data-open="demande">{i("join","sm")}Demander à rejoindre</button></div>'
+              f'<div class="ab mode-scope m-walk" data-view="pied" hidden><span class="free-tag">Gratuit</span>'
+              f'<button class="btn secondary" type="button" data-open="demande-pied">{i("join","sm")}Demander à rejoindre</button></div>'
+              f'<div class="ab mode-scope m-car" data-view="membre" hidden>{MSG_BTN}</div>'
+              f'<div class="ab mode-scope m-bike" data-view="velo" hidden>{MSG_BTN}</div>')
+PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back="recherche", active="recherche", actionbar=TRAJET_BAR, body=f'''
 <div class="crumb" data-view="public" data-mode="car" data-mtitle="Trajet de Léa"><a href="recherche.html">Rechercher</a>{i("chevr","sm")}<span>Trajet de Léa · ven. 26 sept.</span></div>
 <div class="crumb" data-view="membre" data-back="mes-trajets" data-mode="car" data-mtitle="Trajet de Léa" hidden><a href="mes-trajets.html">Mes trajets</a>{i("chevr","sm")}<span>Trajet de Léa · ta place confirmée</span></div>
 <div class="crumb" data-view="velo" data-back="mes-trajets" data-mode="bike" data-mtitle="Trajet à vélo" hidden><a href="mes-trajets.html">Mes trajets</a>{i("chevr","sm")}<span>Trajet à vélo d'Amina · lun. 29 sept.</span></div>
@@ -922,7 +940,7 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <div class="recap">
 <div class="between"><b>Prix par trajet</b><b class="num">2,50 €</b></div>
 </div>
-<button class="btn secondary block" type="button" data-open="demande">{i("join","sm")}Demander à rejoindre ce trajet</button>
+<button class="btn secondary block hide-m" type="button" data-open="demande">{i("join","sm")}Demander à rejoindre ce trajet</button>
 <p class="small muted">Léa répond en moyenne en {LEA_REPLY}. Tu rejoindras ensuite la messagerie du trajet.</p>
 </section>
 <button class="btn danger block" type="button" data-open="signaler">{i("flag","sm")}Signaler ce trajet</button>
@@ -931,7 +949,7 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <section class="card">
 <div class="row"><span class="avatar lg">AS</span><div><h2>{person("AS")}</h2><p class="muted">Licence Informatique · organisatrice</p><p>{stars("5,0", 22)}</p></div></div>
 <div class="row" style="gap:6px"><span class="badge ok">{i("shield","sm")}Compte universitaire vérifié</span></div>
-<a class="btn block" href="messages.html">{i("msg","sm")}Messagerie du trajet</a>
+<a class="btn block hide-m" href="messages.html#conversation">{i("msg","sm")}Messagerie du trajet</a>
 <button class="btn danger block" type="button" data-toast="Tu as quitté le trajet à vélo">{i("leave","sm")}Quitter ce trajet</button>
 </section>
 <button class="btn danger block" type="button" data-open="signaler">{i("flag","sm")}Signaler ce trajet</button>
@@ -943,7 +961,7 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <div class="recap">
 <div class="between"><b>Prix</b><b>Gratuit</b></div>
 </div>
-<button class="btn secondary block" type="button" data-open="demande-pied">{i("join","sm")}Demander à rejoindre ce trajet</button>
+<button class="btn secondary block hide-m" type="button" data-open="demande-pied">{i("join","sm")}Demander à rejoindre ce trajet</button>
 <p class="small muted">Chloé répond en moyenne en {CHLOE_REPLY}. Tu rejoindras ensuite la messagerie du trajet.</p>
 </section>
 <button class="btn danger block" type="button" data-open="signaler">{i("flag","sm")}Signaler ce trajet</button>
@@ -952,7 +970,7 @@ PAGES["trajet"] = dict(title="Détail du trajet", mtitle="Trajet de Léa", back=
 <section class="card">
 <div class="row"><span class="avatar lg b">LM</span><div><h2>{person("LM")}</h2><p class="muted">Master Génie civil · ta conductrice</p><p>{stars("4,9", 38)}</p></div></div>
 <div class="row" style="gap:6px"><span class="badge ok">{i("shield","sm")}Compte universitaire vérifié</span><span class="badge line">42 trajets conduits</span></div>
-<a class="btn block" href="messages.html">{i("msg","sm")}Messagerie du trajet</a>
+<a class="btn block hide-m" href="messages.html#conversation">{i("msg","sm")}Messagerie du trajet</a>
 <button class="btn danger block" type="button" data-open="annuler">{i("x","sm")}Annuler ma place</button>
 <p class="small muted">Tu peux annuler une date ou tous tes jours. Léa et les autres passagers sont prévenus automatiquement.</p>
 </section>
@@ -1097,7 +1115,7 @@ PAGES["publier"] = dict(title="Publier un trajet", mtitle="Publier", sub="En voi
 <span class="hint">Jusqu'à {TAG_MAX} tags, selon le mode choisi. Ils aident les autres à trouver ton trajet : ils sont comparés à leurs recherches et à leurs préférences.</span></div>
 <div class="field"><label for="p-desc">Description <span class="muted" style="font-weight:400">(facultatif)</span></label>{textarea("p-desc", "Ex. : j'attends 5 min au plus au point de rendez-vous, préviens-moi si tu as un imprévu.", DESC_MAX, PUB_DESC)}
 <span class="hint">Visible dans le détail du trajet. Ne donne ni ton adresse ni ton numéro : le point de rendez-vous exact se partage dans la messagerie après acceptation.</span></div>
-<div class="dialog-foot"><a class="btn ghost" href="index.html">Annuler</a><button class="btn secondary" type="button" data-open="confirmer">{i("check","sm")}Publier le trajet</button></div>
+<div class="dialog-foot actionbar"><a class="btn ghost" href="index.html">Annuler</a><button class="btn secondary" type="button" data-open="confirmer">{i("check","sm")}Publier le trajet</button></div>
 </section>
 <aside class="stack">
 <h2>Aperçu</h2>
@@ -1213,7 +1231,8 @@ PAGES["trajet"]["modals"] += M_ANNULER + M_PROFIL + M_SIGNALER_COMPTE  # vue pas
 RETIRER = f'<button class="btn sm danger" type="button" data-toast="Demande retirée" data-remove=".trip">{i("x","sm")}Retirer ma demande</button>'
 PAGES["mes-trajets"] = dict(title="Mes trajets", mtitle="Mes trajets", body=f'''
 {trips_switch("mes-trajets")}
-<div class="row" style="gap:6px" data-filter-list="mt-list"><button class="chip on" data-radio data-filter="" type="button">Tous <span class="muted">7</span></button><button class="chip mchip r-d" data-radio data-filter="role-d" type="button">{i("wheel","sm")}Conducteur</button><button class="chip mchip r-p" data-radio data-filter="role-p" type="button">{i("seat","sm")}Passager</button>{"".join(f'<button class="chip mchip m-{m}" data-radio data-filter="m-{m}" type="button">{i(ic,"sm")}{lbl}</button>' for m, (lbl, ic) in MODES.items() if m != "car")}</div>
+<div class="row chips-scroll" style="gap:6px" data-filter-list="mt-list"><button class="chip on" data-radio data-filter="" type="button">Tous <span class="muted">7</span></button><button class="chip mchip r-d" data-radio data-filter="role-d" type="button">{i("wheel","sm")}Conducteur</button><button class="chip mchip r-p" data-radio data-filter="role-p" type="button">{i("seat","sm")}Passager</button>{"".join(f'<button class="chip mchip m-{m}" data-radio data-filter="m-{m}" type="button">{i(ic,"sm")}{lbl}</button>' for m, (lbl, ic) in MODES.items() if m != "car")}</div>
+<button class="notice warn jump hide-d" type="button" data-scroll="mt-demandes">{i("hourglass")}<span><b>2 demandes en attente</b> de réponse</span>{i("chev","sm")}</button>
 <div class="stack-lg" id="mt-list">
 <section class="stack" data-filter-sec>
 <div class="card-head"><h2>Mes trajets acceptés</h2><span class="badge line">5 à venir</span></div>
@@ -1223,7 +1242,7 @@ PAGES["mes-trajets"] = dict(title="Mes trajets", mtitle="Mes trajets", body=f'''
 {trip("Mar. 30 sept.", "Ponctuel", "8 h 05", "Noisy-Champs · Gare RER A", "8 h 25", "Cité Descartes · Copernic", "", 0, 0, 1, "Toi", "", None, ("Discussion", "À l'heure"), role="d", pax=["MD", "PR", "YB", "AS"], mode="walk", href="mon-trajet.html#a-pied", cancel=f'<button class="btn sm danger" type="button" data-open="annuler-pied">{i("x","sm")}Annuler le trajet</button>', actions=f'<a class="btn sm ghost" href="publier.html">{i("edit","sm")}Modifier</a>')}
 {trip("Mer. 1er oct.", "Ponctuel", "18 h 00", "Cité Descartes · Copernic", "18 h 30", "Chelles · Gare", "2,00 €", 3, 3, 0, "Toi", "", None, (), role="d", cancel=f'<button class="btn sm danger" type="button" data-open="annuler-trajet">{i("x","sm")}Annuler le trajet</button>', actions=f'<a class="btn sm ghost" href="publier.html">{i("edit","sm")}Modifier</a>')}
 </section>
-<section class="stack" data-filter-sec>
+<section class="stack" id="mt-demandes" data-filter-sec>
 <div class="card-head"><div><h2>Mes demandes</h2><p class="small muted">En attente de réponse. Tu peux retirer une demande à tout moment.</p></div><span class="badge wait">{i("hourglass","sm")}2 en attente</span></div>
 {trip("Ven. 26 sept.", "Ponctuel", "17 h 45", "Cité Descartes · Bienvenüe", "18 h 10", "Torcy · Centre", "3,00 €", 2, 3, 0, "Yanis B.", "4,7", 12, ("Bagages",), role="p", pax=["HP"], sent=True, reply=YANIS_REPLY, cancel=RETIRER)}
 {trip("Mer. 1er oct.", "L M M J V", "7 h 55", "Noisy-Champs · Gare RER A", "8 h 20", "Cité Descartes · Copernic", "", 0, 0, 0, "Chloé L.", "4,7", 18, ("Discussion",), role="p", pax=["CL", "IN", "TK"], mode="walk", href="trajet.html#pied", sent=True, reply=CHLOE_REPLY, cancel=RETIRER)}
@@ -1234,7 +1253,9 @@ PAGES["mes-trajets"] = dict(title="Mes trajets", mtitle="Mes trajets", body=f'''
 
 # ================================================================== MON TRAJET (vue conducteur)
 # Vue organisateur : voiture par défaut (passagers, demandes) ; #a-pied = trajet sans voiture (participants, demandes sans places).
-PAGES["mon-trajet"] = dict(title="Mon trajet", mtitle="Mon trajet", back="mes-trajets", active="mes-trajets", body=f'''
+MON_TRAJET_BAR = "".join(f'<div class="ab mode-scope m-{m}" data-view="{v}"{h}>{MSG_BTN}<a class="btn ghost" href="publier.html">{i("edit","sm")}Modifier</a></div>'
+                         for v, m, h in [("voiture", "car", ""), ("a-pied", "walk", " hidden")])
+PAGES["mon-trajet"] = dict(title="Mon trajet", mtitle="Mon trajet", back="mes-trajets", active="mes-trajets", actionbar=MON_TRAJET_BAR, body=f'''
 <div class="crumb" data-view="voiture" data-mode="car" data-mtitle="Mon trajet"><a href="mes-trajets.html">Mes trajets</a>{i("chevr","sm")}<span>Noisy-le-Grand → Copernic · ven. 26 sept.</span></div>
 <div class="crumb" data-view="a-pied" data-mode="walk" data-mtitle="Mon trajet à pied" data-back="mes-trajets" hidden><a href="mes-trajets.html">Mes trajets</a>{i("chevr","sm")}<span>À pied · Noisy-Champs → Copernic · mar. 30 sept.</span></div>
 <div class="split mode-scope m-car" data-mode-default="car">
@@ -1261,7 +1282,7 @@ PAGES["mon-trajet"] = dict(title="Mon trajet", mtitle="Mon trajet", back="mes-tr
 {trip_desc(PUB_DESC, "Ta description")}
 <div class="row" style="gap:6px">{tags_static(["Non-fumeur", "Musique"])}</div>
 </section>
-<section class="card" id="demandes" data-view="voiture">
+<section class="card first-m" id="demandes" data-view="voiture">
 <div class="card-head"><div><h2>Demandes en attente</h2><p class="small muted">Accepte ou refuse chaque passager. Une demande reste en attente jusqu'à ta réponse (rappel au bout de 12 h) ; le passager peut la retirer à tout moment.</p></div><span class="badge wait">{i("hourglass","sm")}2 en attente</span></div>
 <div class="req-list">
 {req("IN", "Inès N.", "4,8", [3, 4], "1 place", "Je t'attendrai côté gare routière.", "à Noisy-Champs (étape 1)")}
@@ -1283,7 +1304,7 @@ PAGES["mon-trajet"] = dict(title="Mon trajet", mtitle="Mon trajet", back="mes-tr
 {trip_desc("", "Ta description", edit=True)}
 <div class="row" style="gap:6px">{tags_static(["Discussion", "À l'heure"])}</div>
 </section>
-<section class="card" data-view="a-pied" hidden>
+<section class="card first-m" data-view="a-pied" hidden>
 <div class="card-head"><div><h2>Demandes en attente</h2><p class="small muted">Accepte ou refuse chaque personne. Une demande reste en attente jusqu'à ta réponse (rappel au bout de 12 h) ; elle peut être retirée à tout moment.</p></div><span class="badge wait">{i("hourglass","sm")}1 en attente</span></div>
 <div class="req-list">
 {req("HP", "Hugo P.", "4,6", None, "", "Je pars aussi de Noisy-Champs, à mardi !", "")}
@@ -1300,8 +1321,8 @@ PAGES["mon-trajet"] = dict(title="Mon trajet", mtitle="Mon trajet", back="mes-tr
 </div>
 </section>
 <section class="card" data-view="voiture">
-<a class="btn block" href="messages.html">{i("msg","sm")}Messagerie du trajet</a>
-<a class="btn ghost block" href="publier.html">{i("edit","sm")}Modifier le trajet</a>
+<a class="btn block hide-m" href="messages.html#conversation">{i("msg","sm")}Messagerie du trajet</a>
+<a class="btn ghost block hide-m" href="publier.html">{i("edit","sm")}Modifier le trajet</a>
 <button class="btn danger block" type="button" data-open="annuler-trajet">{i("x","sm")}Annuler le trajet</button>
 </section>
 <section class="card" data-view="a-pied" hidden>
@@ -1314,8 +1335,8 @@ PAGES["mon-trajet"] = dict(title="Mon trajet", mtitle="Mon trajet", back="mes-tr
 </div>
 </section>
 <section class="card" data-view="a-pied" hidden>
-<a class="btn block" href="messages.html">{i("msg","sm")}Messagerie du trajet</a>
-<a class="btn ghost block" href="publier.html">{i("edit","sm")}Modifier le trajet</a>
+<a class="btn block hide-m" href="messages.html#conversation">{i("msg","sm")}Messagerie du trajet</a>
+<a class="btn ghost block hide-m" href="publier.html">{i("edit","sm")}Modifier le trajet</a>
 <button class="btn danger block" type="button" data-open="annuler-pied">{i("x","sm")}Annuler le trajet</button>
 </section>
 </aside>
@@ -1376,7 +1397,7 @@ PAGES["historique"] = dict(title="Historique", mtitle="Historique", back="mes-tr
 </div>
 <section class="card">
 <div class="card-head"><h2>Tous mes trajets</h2><span class="small muted">42 trajets</span></div>
-<div class="table-wrap" tabindex="0" role="region" aria-label="Tous mes trajets"><table class="table">
+<div class="table-wrap" tabindex="0" role="region" aria-label="Tous mes trajets"><table class="table cards-m hist">
 <thead><tr><th>Date</th><th>Trajet</th><th>Rôle</th><th>Avec</th><th>Distance · CO₂</th><th>Ma note</th></tr></thead>
 <tbody>{rows}</tbody></table></div>
 </section>
@@ -1384,19 +1405,50 @@ PAGES["historique"] = dict(title="Historique", mtitle="Historique", back="mes-tr
 
 # ================================================================== MESSAGES
 # Une conversation n'existe qu'une fois la demande acceptée : pas de conversation pour une demande en attente.
-PAGES["messages"] = dict(title="Messages", mtitle="Messages", back="index", sub="Une conversation par trajet, avec tous ses membres.", body=f'''
+# Mobile en deux étapes : la liste seule, puis la conversation seule (classe .in-conv sur .app, openConv() dans app.js ;
+# ancre #conversation). Les membres passent dans la popup #membres dès 1 280 px (en ordinateur large : colonne de droite).
+MEMBRES_HTML = f'''<div class="list">
+{person_row("LM", f'Conductrice · {stars("4,9")}')}
+{person_row("IN", "Passagère · J V")}
+{person_row("TK", "Passager · V")}
+<div class="li"><span class="avatar sm">MD</span><div class="grow"><b>Toi</b><span>Passager · L J V</span></div></div>
+</div>
+<h3 class="sub-h">Anciens membres</h3>
+<div class="list">{person_row("CL", "A quitté le trajet le 23 sept.", CHLOE_LEFT)}</div>
+<p class="small muted">Touche une personne pour voir son profil ou la signaler.</p>'''
+CHAT_RULES = f'<p class="small muted">{i("lock","sm")} Messagerie encadrée : numéros de téléphone et liens masqués. Fermée 24 h après la fin du trajet.</p>'
+M_MEMBRES = modal("membres", f'''
+{dhead("Noisy-le-Grand · Mont d'Est → Copernic", "Régulier L M J V · départ 7 h 50", "users")}
+<a class="btn ghost block" href="trajet.html#membre">{i("ticket","sm")}Voir le trajet</a>
+<div class="members stack" style="gap:8px"><h3>Membres du trajet</h3>
+{MEMBRES_HTML}</div>
+{CHAT_RULES}
+<div class="dialog-foot"><button class="btn danger" type="button" data-open="signaler-compte">{i("flag","sm")}Signaler</button><button class="btn danger" type="button" data-open="annuler">{i("leave","sm")}Quitter ce trajet</button></div>
+''')
+
+def conv(title, avs, line, badge="", sel=False):
+    """Conversation de la liste : un bouton (clavier) qui ouvre la conversation (data-conv, app.js)."""
+    avatars = "".join(f'<span class="avatar xs">{a}</span>' for a in avs)
+    cur = ' sel" aria-current="true' if sel else ""
+    return (f'<button class="li click{cur}" type="button" data-conv data-conv-title="{title}"><span class="avatars">{avatars}</span>'
+            f'<span class="grow"><b>{title}</b><span>{line}</span></span>{badge}</button>')
+
+PAGES["messages"] = dict(title="Messages", mtitle="Messages", back="index", sub="Une conversation par trajet, avec tous ses membres.",
+    mright=f'<button class="iconbtn conv-only" type="button" data-open="membres" aria-label="Membres et infos du trajet" title="Membres et infos">{i("users")}</button>',
+    body=f'''
 <div class="chat-layout">
 <aside class="card tight conv-list">
 <div class="list">
-<div class="li click sel" data-conv><span class="avatars"><span class="avatar xs">LM</span><span class="avatar xs">IN</span></span><div class="grow"><b>Noisy → Copernic</b><span>Régulier · 4 membres · « J'y serai à 7 h 45 »</span></div><span class="badge lav">1</span></div>
-<div class="li click" data-conv><span class="avatars"><span class="avatar xs">AS</span><span class="avatar xs">PR</span></span><div class="grow"><b>Copernic → Noisy-Champs à vélo</b><span>Lun. 29 sept. · 5 membres</span></div></div>
-<div class="li click" data-conv><span class="avatars"><span class="avatar xs">MD</span><span class="avatar xs">IN</span></span><div class="grow"><b>Copernic → Chelles</b><span>Mer. 1er oct. · tu conduis</span></div><span class="badge lav">1</span></div>
-<div class="li click" data-conv><span class="avatars"><span class="avatar xs">AS</span></span><div class="grow"><b>Lavoisier → Chelles</b><span>Terminé · conversation fermée</span></div>{i("lock","sm")}</div>
+{conv("Noisy → Copernic", ["LM", "IN"], "Régulier · 4 membres · « J'y serai à 7 h 45 »", '<span class="badge lav" aria-label="1 message non lu">1</span>', sel=True)}
+{conv("Copernic → Noisy-Champs à vélo", ["AS", "PR"], "Lun. 29 sept. · 5 membres")}
+{conv("Copernic → Chelles", ["MD", "IN"], "Mer. 1er oct. · tu conduis", '<span class="badge lav" aria-label="1 message non lu">1</span>')}
+{conv("Lavoisier → Chelles", ["AS"], "Terminé · conversation fermée", i("lock","sm"))}
 </div>
 <p class="small muted conv-note">{i("info","sm")} La conversation d'un trajet s'ouvre quand ta demande est acceptée.</p>
 </aside>
 <section class="card chat-main">
 <div class="chat-head"><div class="grow"><h3>Noisy-le-Grand · Mont d'Est → Copernic</h3><span class="small muted">Régulier L M J V · départ 7 h 50 · Léa, Inès, Thomas et toi</span></div>
+<button class="btn sm ghost members-btn" type="button" data-open="membres">{i("users","sm")}Membres (4)</button>
 <a class="btn sm ghost" href="trajet.html#membre">Voir le trajet</a>
 <button class="btn sm danger" type="button" data-open="signaler-compte">{i("flag","sm")}Signaler</button></div>
 <div class="divider"></div>
@@ -1414,23 +1466,15 @@ PAGES["messages"] = dict(title="Messages", mtitle="Messages", back="index", sub=
 <div class="bubble out">Parfait, j'y serai à 7 h 45.<small>Toi · 20 h 20</small></div>
 </div>
 <div class="composer"><div class="input"><input id="chat-input" maxlength="300" placeholder="Écrire aux membres du trajet…" aria-label="Message"></div><button class="btn" type="button" data-toast="Message envoyé" aria-label="Envoyer">{i("send","sm")}<span class="hide-m">Envoyer</span></button></div>
-<p class="small muted">{i("lock","sm")} Messagerie encadrée : numéros de téléphone et liens masqués. Fermée 24 h après la fin du trajet.</p>
+<div class="chat-rules">{CHAT_RULES}</div>
 </section>
 <aside class="card tight members">
 <h3>Membres du trajet</h3>
-<div class="list">
-{person_row("LM", f'Conductrice · {stars("4,9")}')}
-{person_row("IN", "Passagère · J V")}
-{person_row("TK", "Passager · V")}
-<div class="li"><span class="avatar sm">MD</span><div class="grow"><b>Toi</b><span>Passager · L J V</span></div></div>
-</div>
-<h3 class="sub-h">Anciens membres</h3>
-<div class="list">{person_row("CL", "A quitté le trajet le 23 sept.", CHLOE_LEFT)}</div>
-<p class="small muted">Touche une personne pour voir son profil ou la signaler.</p>
+{MEMBRES_HTML}
 <button class="btn sm danger block" type="button" data-open="annuler">{i("leave","sm")}Quitter ce trajet</button>
 </aside>
 </div>
-''', modals=M_PROFIL + M_SIGNALER_COMPTE + M_ANNULER)
+''', modals=M_MEMBRES + M_PROFIL + M_SIGNALER_COMPTE + M_ANNULER)
 
 # ================================================================== PROFIL
 voiture = modal("voiture", f'''
@@ -1490,7 +1534,7 @@ delete = modal("supprimer-compte", f'''
 <div data-step hidden>{success("Compte supprimé", "Tes données personnelles ont été effacées. Un e-mail de confirmation t'a été envoyé.", '<a class="btn ghost" href="connexion.html">Retour à la connexion</a>')}</div>
 ''')
 slots = [("Lundi", "8 h 30", "17 h 30"), ("Mardi", "8 h 30", "18 h 00"), ("Jeudi", "9 h 45", "17 h 45"), ("Vendredi", "8 h 30", "12 h 30")]
-slot_rows = "".join(f'<tr><td><b>{d}</b></td><td class="num">{a}</td><td class="num">{b}</td><td style="text-align:right;white-space:nowrap"><button class="iconbtn" type="button" data-open="creneau" aria-label="Modifier {d}" title="Modifier" style="width:34px;height:34px">{i("edit","sm")}</button> <button class="iconbtn" type="button" data-toast="Créneau du {d.lower()} supprimé" data-remove="tr" aria-label="Supprimer {d}" title="Supprimer" style="width:34px;height:34px;color:var(--danger)">{i("trash","sm")}</button></td></tr>' for d, a, b in slots)
+slot_rows = "".join(f'<tr><td><b>{d}</b></td><td class="num" data-label="Arrivée">{a}</td><td class="num" data-label="Départ">{b}</td><td style="text-align:right;white-space:nowrap"><button class="iconbtn" type="button" data-open="creneau" aria-label="Modifier {d}" title="Modifier" style="width:34px;height:34px">{i("edit","sm")}</button> <button class="iconbtn" type="button" data-toast="Créneau du {d.lower()} supprimé" data-remove="tr" aria-label="Supprimer {d}" title="Supprimer" style="width:34px;height:34px;color:var(--danger)">{i("trash","sm")}</button></td></tr>' for d, a, b in slots)
 # Notifications (Profil) : une ligne par événement, selon les fonctionnalités ; deux canaux (appli, e-mail universitaire).
 # (titre, description, appli, e-mail) ; appli None = notification obligatoire, « Toujours activée ».
 NOTIFS = [
@@ -1527,47 +1571,75 @@ def notif_row(title, desc, app, mail):
         return f'<div class="notif-row">{txt}<span class="notif-lock">{i("lock","sm")}Toujours activée</span></div>'
     return f'<div class="notif-row">{txt}{notif_toggle(title, "appli", app)}{notif_toggle(title, "e-mail", mail)}</div>'
 
-NOTIF_CARD = ('<section class="card">'
-              '<div class="card-head"><div><h2>Notifications</h2><p class="small muted">Choisis comment être prévenu : dans l\'appli ou par e-mail '
-              'sur ton adresse universitaire. Les notifications liées à la sécurité de tes trajets et de ton compte restent toujours activées.</p></div></div>'
+def fold_head(id_, title, resume="", action=""):
+    """En-tête d'une section repliable en mobile seulement (Profil) : titre-bouton (motif accordéon, data-collapse) et,
+    replié, un résumé d'une ligne. action : bouton d'en-tête, masqué en mobile (le reprendre en bas du corps, classe hide-d).
+    Le corps qui suit : <div class="collapse-body" id="{id_}">."""
+    sm = f'<p class="small muted fold-sum hide-d">{resume}</p>' if resume else ""
+    act = f'<div class="hide-m">{action}</div>' if action else ""
+    return (f'<div class="card-head fold-head"><div class="grow"><h2 class="collapse-title"><button type="button" data-collapse aria-expanded="false" aria-controls="{id_}">'
+            f'<span>{title}</span>{i("chev", "sm hide-d")}</button></h2>{sm}</div>{act}</div>')
+
+NOTIF_CARD = ('<section class="card collapsible">'
+              + fold_head("pf-notif", "Notifications", "Appli et e-mail · rappel 30 min avant le départ")
+              + '<div class="collapse-body" id="pf-notif"><p class="small muted">Choisis comment être prévenu : dans l\'appli ou par e-mail '
+              'sur ton adresse universitaire. Les notifications liées à la sécurité de tes trajets et de ton compte restent toujours activées.</p>'
               '<div class="notif">'
               + "".join(f'<div class="notif-head"><h3>{g}</h3><span>Appli</span><span>E-mail</span></div>' + "".join(notif_row(*r) for r in rows)
                         for g, rows in NOTIFS)
-              + '</div></section>')
+              + '</div></div></section>')
 
+# Mobile : la fiche (nom, note, Modifier, Se déconnecter) passe en tête et chaque section se replie (fold_head) :
+# la page devient un sommaire qui tient dans le premier écran. En ordinateur, rien ne change.
+VISIBLE_NOTE = "Les autres membres voient ton prénom, l'initiale de ton nom, ta formation, ton campus et ta note moyenne."
+ADD_SLOT = f'<button class="btn sm" type="button" data-open="creneau">{i("plus","sm")}Ajouter un créneau</button>'
+ADD_CAR = f'<button class="btn sm ghost" type="button" data-open="voiture">{i("plus","sm")}Ajouter une voiture</button>'
 PAGES["profil"] = dict(title="Profil", mtitle="Profil", body=f'''
 <div class="split">
-<div class="stack-lg">
-<section class="card">
-<div class="card-head"><div><h2>Mon campus et mes zones</h2><p class="small muted">Chaque campus a ses propres zones de rendez-vous, définies par l'université. Pas de géolocalisation, pas d'adresse.</p></div></div>
+<div class="stack-lg pf-sections">
+<section class="card collapsible">
+{fold_head("pf-campus", "Mon campus et mes zones", f'<span data-campus-name>{CAMPUS}</span> · Mont d\'Est → Copernic')}
+<div class="collapse-body" id="pf-campus">
+<p class="small muted">Chaque campus a ses propres zones de rendez-vous, définies par l'université. Pas de géolocalisation, pas d'adresse.</p>
 <div class="field"><span class="label">Campus</span>{select("pr-site", CAMPUS, "campus", [("Campus de l'Université Gustave Eiffel", [c[0] for c in CAMPUSES])], attrs=" data-campus-ctl")}<span class="hint">Change de campus : les zones de départ et les points d'arrivée ci-dessous se mettent à jour.</span></div>
 <div class="grid-2">
 <div class="field"><span class="label">Zone de départ habituelle</span>{select("pr-zone", "Noisy-le-Grand · Mont d'Est", "pin", dyn="dep")}</div>
 <div class="field"><span class="label">Point d'arrivée habituel</span>{select("pr-campus", "Cité Descartes · Copernic", "pin", dyn="arr")}</div>
 </div>
+</div>
 </section>
-<section class="card">
-<div class="card-head"><h2>Horaires types</h2><button class="btn sm" type="button" data-open="creneau">{i("plus","sm")}Ajouter un créneau</button></div>
-<div class="table-wrap"><table class="table">
-<thead><tr><th>Jour</th><th>Arrivée au campus</th><th>Départ du campus</th><th></th></tr></thead>
+<section class="card collapsible">
+{fold_head("pf-slots", "Horaires types", f"{len(slots)} créneaux · arrivée vers 8 h 30", ADD_SLOT)}
+<div class="collapse-body" id="pf-slots">
+<div class="table-wrap"><table class="table cards-m slots">
+<thead><tr><th>Jour</th><th>Arrivée au campus</th><th>Départ du campus</th><th><span class="sr-only">Actions</span></th></tr></thead>
 <tbody>{slot_rows}</tbody></table></div>
+<div class="hide-d">{ADD_SLOT}</div>
+</div>
 </section>
-<section class="card">
-<div class="card-head"><h2>Mes véhicules</h2><button class="btn sm ghost" type="button" data-open="voiture">{i("plus","sm")}Ajouter une voiture</button></div>
+<section class="card collapsible">
+{fold_head("pf-cars", "Mes véhicules", "Renault Clio · grise · 3 places", ADD_CAR)}
+<div class="collapse-body" id="pf-cars">
 <div class="list">
 <div class="li"><span class="iconbtn">{i("car","sm")}</span><div class="grow"><b>Renault Clio · grise</b><span>3 places passagers</span></div><button class="iconbtn" type="button" data-open="voiture" aria-label="Modifier la voiture" title="Modifier">{i("edit","sm")}</button><button class="iconbtn" type="button" data-toast="Voiture supprimée" data-remove=".li" aria-label="Supprimer la voiture" title="Supprimer" style="color:var(--danger)">{i("trash","sm")}</button></div>
 </div>
+<div class="hide-d">{ADD_CAR}</div>
+</div>
 </section>
-<section class="card">
-<h2>Préférences</h2>
+<section class="card collapsible">
+{fold_head("pf-prefs", "Préférences", ", ".join(PREFS))}
+<div class="collapse-body" id="pf-prefs">
 <div class="field">{tp_head("Ce qui compte pour moi", PREFS)}{tagpick("pr-tags", PREFS)}
 <span class="hint">Coche ou décoche d'un tap. Ces préférences sont comparées aux tags des trajets pour te proposer les plus compatibles.</span></div>
 <div class="divider"></div>
 <div class="optline"><span>Uniquement des trajets avec des étudiants de ma composante</span><button class="toggle" type="button" aria-pressed="false" aria-label="Ma composante uniquement"></button></div>
+</div>
 </section>
 {NOTIF_CARD}
-<section class="card">
-<h2>Confidentialité et données</h2>
+<section class="card collapsible">
+{fold_head("pf-rgpd", "Confidentialité et données", "Mes données, export, visibilité, suppression")}
+<div class="collapse-body" id="pf-rgpd">
+<div class="notice hide-d">{i("shield")}<span>{VISIBLE_NOTE}</span></div>
 <p class="small muted">U-Mobility applique le RGPD : tu peux consulter, exporter ou effacer tes données à tout moment.</p>
 <div class="list">
 <a class="li click" href="donnees.html"><span class="iconbtn">{i("shield","sm")}</span><div class="grow"><b>Comment sont gérées mes données</b><span>Ce qui est collecté, pourquoi, qui le voit, combien de temps, tes droits</span></div>{i("chevr","sm")}</a>
@@ -1575,17 +1647,18 @@ PAGES["profil"] = dict(title="Profil", mtitle="Profil", body=f'''
 <div class="li"><span class="iconbtn">{i("eye","sm")}</span><div class="grow"><b>Visibilité du profil</b><span>Nom complet visible uniquement par les membres de tes trajets</span></div><button class="toggle on" type="button" aria-pressed="true" aria-label="Visibilité limitée"></button></div>
 <div class="li"><span class="iconbtn" style="color:var(--danger)">{i("trash","sm")}</span><div class="grow"><b>Supprimer mon compte et mes données</b><span>Effacement définitif de tes données personnelles</span></div><button class="btn sm danger" type="button" data-open="supprimer-compte">Supprimer</button></div>
 </div>
+</div>
 </section>
 </div>
-<aside class="stack-lg">
-<section class="card" style="justify-items:center;text-align:center">
+<aside class="stack-lg first-m">
+<section class="card me-card">
 <span class="avatar lg">MD</span>
-<div><h2>Mathis D.</h2><p class="muted">BUT Informatique · 2e année</p><p class="small muted campus-line" style="justify-content:center">{i("campus","sm")}<span data-campus-name>{CAMPUS}</span></p></div>
-<div class="stack" style="gap:2px;justify-items:center"><span class="small muted">Ma note</span>{stars("4,8", "48 notes")}</div>
-<button class="btn ghost block" type="button" data-open="modifier-profil">{i("edit","sm")}Modifier le profil</button>
-<button class="btn danger block" type="button" data-logout>{i("logout","sm")}Se déconnecter</button>
+<div><h2>Mathis D.</h2><p class="muted">BUT Informatique · 2e année</p><p class="small muted campus-line">{i("campus","sm")}<span data-campus-name>{CAMPUS}</span></p></div>
+<div class="stack me-note"><span class="small muted">Ma note</span>{stars("4,8", "48 notes")}</div>
+<div class="me-acts"><button class="btn ghost block" type="button" data-open="modifier-profil">{i("edit","sm")}<span>Modifier<span class="hide-m"> le profil</span></span></button>
+<button class="btn danger block" type="button" data-logout>{i("logout","sm")}Se déconnecter</button></div>
 </section>
-<div class="notice">{i("shield")}<span>Les autres membres voient ton prénom, l'initiale de ton nom, ta formation, ton campus et ta note moyenne.</span></div>
+<div class="notice hide-m">{i("shield")}<span>{VISIBLE_NOTE}</span></div>
 </aside>
 </div>
 ''', modals=creneau + voiture + edit_profile + export + delete)
@@ -1596,6 +1669,8 @@ PAGES["profil"] = dict(title="Profil", mtitle="Profil", body=f'''
 RGPD_SECTIONS = [("d-resp", "Qui est responsable"), ("d-quoi", "Données et finalités"), ("d-jamais", "Ce qu'on ne collecte pas"),
                  ("d-qui", "Qui voit quoi"), ("d-duree", "Durées de conservation"), ("d-cookies", "Cookies et sécurité"), ("d-droits", "Tes droits")]
 rgpd_toc = "".join(f'<button type="button" data-scroll="{k}"><span class="n">{n}</span>{t}</button>' for n, (k, t) in enumerate(RGPD_SECTIONS, 1))
+# Mobile : le sommaire (colonne de droite en ordinateur) devient une rangée de puces sous le bandeau, dans le premier écran.
+rgpd_toc_m = "".join(f'<button class="chip" type="button" data-scroll="{k}"><span class="n">{n}</span>{t}</button>' for n, (k, t) in enumerate(RGPD_SECTIONS, 1))
 rgpd_key = "".join(f'<div class="stat"><span class="k">{i(ic,"sm")}{k}</span><b>{t}</b><span class="d">{d}</span></div>' for ic, k, t, d in [
     ("pin", "Localisation", "Ni adresse, ni GPS", "Seulement des zones définies par l'université"),
     ("eyeoff", "Partage", "Aucune revente", "Pas de publicité ni de partenaire commercial"),
@@ -1660,6 +1735,7 @@ PAGES["donnees"] = dict(title="Données personnelles", mtitle="Mes données", ba
 <p>U-Mobility ne collecte que ce qui sert à covoiturer entre membres de l'Université Gustave Eiffel. Voici, en clair, ce qu'on garde, pourquoi, qui le voit et comment tout récupérer ou effacer.</p>
 <div class="cta"><a class="btn light" href="profil.html#export-donnees">{i("download","sm")}Télécharger mes données</a><button class="btn secondary" type="button" data-open="exercer-droits">{i("send","sm")}Exercer mes droits</button></div>
 </section>
+<nav class="row chips-scroll toc-m hide-d" aria-label="Sommaire">{rgpd_toc_m}</nav>
 <div class="grid-4 rgpd-key">{rgpd_key}</div>
 <div class="split rgpd">
 <div class="stack-lg">
@@ -1722,7 +1798,7 @@ sig = [
     ("#241", "Compte", "Compte #2107", "Harcèlement", "20 sept.", "ok", "Traité · suspendu 7 j", 4),
 ]
 srows = "".join(
-    f'<tr class="click" data-open="signalement"><td class="muted num">{n}</td><td><span class="badge line">{i("car" if t == "Trajet" else "user","sm")}{t}</span></td><td><b>{o}</b></td><td>{m}</td><td class="num">{c}</td><td class="muted" style="white-space:nowrap">{d}</td><td><span class="badge {cls}">{s}</span></td><td>{i("chevr","sm")}</td></tr>'
+    f'<tr class="click" data-open="signalement"><td class="muted num">{n}</td><td><span class="badge line">{i("car" if t == "Trajet" else "user","sm")}{t}</span></td><td><b>{o}</b></td><td>{m}</td><td class="num" data-label="Signalements">{c}</td><td class="muted" style="white-space:nowrap">{d}</td><td><span class="badge {cls}">{s}</span></td><td>{i("chevr","sm")}</td></tr>'
     for n, t, o, m, d, cls, s, c in sig)
 PAGES["moderation"] = dict(title="Signalements", roles=("mod", "admin"), mtitle="Signalements", sub="Visible uniquement par les modérateurs et les administrateurs.", body=f'''
 <div class="grid-4">
@@ -1732,8 +1808,8 @@ PAGES["moderation"] = dict(title="Signalements", roles=("mod", "admin"), mtitle=
 <div class="stat"><span class="k">{i("users","sm")}Comptes suspendus</span><span class="v">1</span></div>
 </div>
 <section class="card">
-<div class="card-head"><div class="row" style="gap:6px"><button class="chip on" data-radio type="button">Tous</button><button class="chip" data-radio type="button">Comptes</button><button class="chip" data-radio type="button">Trajets</button><button class="chip" data-radio type="button">Nouveaux</button><button class="chip" data-radio type="button">Traités</button></div><div class="input" style="min-width:220px">{i("search","sm")}<input id="mod-q" placeholder="N° de signalement ou de compte" aria-label="Rechercher"></div></div>
-<div class="table-wrap"><table class="table">
+<div class="card-head"><div class="row chips-scroll" style="gap:6px"><button class="chip on" data-radio type="button">Tous</button><button class="chip" data-radio type="button">Comptes</button><button class="chip" data-radio type="button">Trajets</button><button class="chip" data-radio type="button">Nouveaux</button><button class="chip" data-radio type="button">Traités</button></div><div class="input" style="min-width:220px">{i("search","sm")}<input id="mod-q" placeholder="N° de signalement ou de compte" aria-label="Rechercher"></div></div>
+<div class="table-wrap"><table class="table cards-m mods">
 <thead><tr><th>N°</th><th>Type</th><th>Objet</th><th>Motif</th><th>Signalé</th><th>Reçu</th><th>Statut</th><th></th></tr></thead>
 <tbody>{srows}</tbody></table></div>
 </section>
@@ -1833,7 +1909,8 @@ PLAN = [
                    ("suspendu.html#contester", "Popup · contester la suspension", "")]),
     ("Utilisateur", "user", [
         ("index.html", "Tableau de bord", "Activité façon GitHub, prochains trajets, trajets à noter"),
-        ("recherche.html", "Rechercher un trajet", "Modes de déplacement, zones du campus, tags, filtres repliés en mobile, pagination"),
+        ("recherche.html", "Rechercher un trajet", "Modes de déplacement, zones du campus, tags, pagination ; en mobile, formulaire et filtres repliés"),
+        ("recherche.html#modifier", "Rechercher · formulaire ouvert (mobile)", "« Modifier » sous le résumé de la recherche"),
         ("recherche.html#filtres", "Rechercher · filtres ouverts (mobile)", ""),
         ("trajet.html", "Détail du trajet (passager)", "Notes sans avis, temps de réponse du conducteur"),
         ("trajet.html#demande", "Popup · demande pour rejoindre", "Jours, point de montée, places, message ; temps de réponse moyen"),
@@ -1857,7 +1934,9 @@ PLAN = [
         ("historique.html#noter-conducteur", "Popup · noter le conducteur", "5 étoiles, sans texte"),
         ("historique.html#noter-passagers", "Popup · noter les passagers", "5 étoiles, sans texte"),
         ("historique.html#signaler-compte", "Popup · signaler un compte", ""),
-        ("messages.html", "Messagerie du trajet", "Messages système, membres et anciens membres cliquables"),
+        ("messages.html", "Messagerie du trajet", "Mobile : la liste des conversations seule ; ordinateur : liste, conversation et membres"),
+        ("messages.html#conversation", "Messagerie · conversation ouverte (mobile)", "Messages seuls, saisie collée en bas, membres dans la popup"),
+        ("messages.html#membres", "Popup · membres et infos du trajet", "Membres et anciens membres cliquables, voir le trajet, signaler, quitter"),
         ("messages.html#profil", "Popup · profil d'une personne", "Note, trajets, signaler (ici une ancienne membre)"),
         ("messages.html#signaler-profil", "Popup · signaler depuis un profil", "La personne est déjà choisie : pas de liste"),
         ("messages.html#signaler-compte", "Popup · signaler un compte (en-tête)", "Choix du membre, une note suffit ?, faits, images, messages joints, engagement"),
@@ -1924,7 +2003,8 @@ def nbsp(h):
 for k, p in PAGES.items():
     if not p.get("raw"):
         p["app"] = app_page(k, p["title"], p["body"], roles=p.get("roles", ("user",)), active=p.get("active"),
-                            sub=p.get("sub", ""), mtitle=p.get("mtitle"), back=p.get("back"), topright=p.get("topright", ""))
+                            sub=p.get("sub", ""), mtitle=p.get("mtitle"), back=p.get("back"), topright=p.get("topright", ""),
+                            mright=p.get("mright"), actionbar=p.get("actionbar", ""))
 for p in PAGES.values():
     p["app"], p["modals"] = nbsp(color_avatars(p["app"])), nbsp(color_avatars(p["modals"]))
 
@@ -1972,7 +2052,11 @@ tpls = "".join(f'<template id="tpl-{k}">{PAGES[k]["app"]}</template><template id
 SHELL_CSS = '''
 body { background: var(--surface); }
 body.device-m { background: #dddee2; }
-body.device-m .frame { max-width: 390px; margin: 24px auto 96px; min-height: 844px; border-radius: 28px; overflow: hidden; box-shadow: 0 0 0 10px #0f273b, 0 30px 80px rgba(15,39,59,.35); }
+body.device-m .frame { max-width: 390px; margin: 24px auto 96px; min-height: 844px; border-radius: 28px; overflow: hidden; overflow: clip; box-shadow: 0 0 0 10px #0f273b, 0 30px 80px rgba(15,39,59,.35); }
+/* overflow: clip (et non hidden) : coupe les coins sans créer de conteneur de défilement, donc les barres collées (onglets, barre d'action, saisie) restent collées */
+/* Aperçu Mobile : barre de démo compacte (icônes seules), à droite du téléphone, pour ne pas couvrir ses onglets */
+body.device-m .demobar .lbl, body.device-m .demobar .btn span { display: none; }
+body.device-m .demobar .btn.sm { width: 40px; padding: 0; justify-content: center; }
 body.device-m .frame .app { min-height: 844px; }
 .shell-bar { position: fixed; right: 16px; bottom: 72px; z-index: 100; display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 999px; background: #0f273b; color: #fff; box-shadow: 0 10px 30px rgba(15,39,59,.35); font: 500 13px/18px var(--font-sans); }
 .shell-bar select { background: #24394c; color: #fff; border: 0; border-radius: 999px; padding: 8px 12px; font: 600 13px/18px var(--font-sans); max-width: 220px; }

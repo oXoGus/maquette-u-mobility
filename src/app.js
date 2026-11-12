@@ -167,6 +167,42 @@
     return true;
   }
 
+  /* ---------- Messagerie : en mobile, la liste seule puis la conversation seule ---------- */
+  // .in-conv sur .app (styles.css) ; le titre du trajet passe dans la barre mobile, le bouton retour revient à la liste.
+  function isMobileLayout() { var l = $('.conv-list'); return !!l && getComputedStyle(l).display === 'none'; }
+  function openConv(li) {
+    var app = $('.app'), mb = $('.mobilebar b'), back = $('.mobilebar a.iconbtn[href]');
+    if (!app || !li) return;
+    $$('.li[data-conv]').forEach(function (x) { var on = x === li; x.classList.toggle('sel', on); if (on) x.setAttribute('aria-current', 'true'); else x.removeAttribute('aria-current'); });
+    app.classList.add('in-conv');
+    if (mb) { if (!mb.hasAttribute('data-title')) mb.setAttribute('data-title', mb.textContent); mb.textContent = li.getAttribute('data-conv-title'); }
+    if (back) { back.setAttribute('data-conv-back', ''); back.setAttribute('aria-label', 'Retour aux conversations'); }
+    // Mobile : on arrive sur les derniers messages, juste au-dessus de la saisie
+    if (isMobileLayout()) window.scrollTo(0, document.documentElement.scrollHeight);
+  }
+  function closeConv() {
+    var app = $('.app'), mb = $('.mobilebar b'), back = $('.mobilebar a.iconbtn[data-conv-back]');
+    if (!app) return;
+    app.classList.remove('in-conv');
+    if (mb && mb.hasAttribute('data-title')) mb.textContent = mb.getAttribute('data-title');
+    if (back) { back.removeAttribute('data-conv-back'); back.setAttribute('aria-label', 'Retour'); }
+    window.scrollTo(0, 0);
+    var sel = $('.li[data-conv].sel'); if (sel) { try { sel.focus({ preventScroll: true }); } catch (e) {} }
+  }
+
+  /* ---------- Blocs repliables (mobile) : filtres et formulaire de la recherche, sections du Profil ---------- */
+  // data-collapse="libellé fermé|libellé ouvert" : aria-label du bouton s'il en a un, sinon le texte de son <span>.
+  function setCollapse(cb, open) {
+    cb.classList.toggle('open', open);
+    $$('[data-collapse]', cb).filter(function (b) { return b.closest('.collapsible') === cb; }).forEach(function (b) {
+      b.setAttribute('aria-expanded', open);
+      var lb = (b.getAttribute('data-collapse') || '').split('|');
+      if (lb.length !== 2) return;
+      if (b.hasAttribute('aria-label')) b.setAttribute('aria-label', open ? lb[1] : lb[0]);
+      else { var sp = b.querySelector('span'); if (sp) sp.textContent = open ? lb[1] : lb[0]; }
+    });
+  }
+
   /* ---------- Pagination (maquette : seule la page active change) ---------- */
   function setPage(el) {
     var pg = el.closest('.pager'), max = parseInt(pg.getAttribute('data-pages'), 10), cur = $('.pg-n.on', pg);
@@ -187,7 +223,10 @@
   /* ---------- State from hash (#demande, #conducteur, #loader…) ---------- */
   function applyState(state) {
     if (!state) return;
-    if (state === 'filtres') { $$('.collapsible').forEach(function (c) { c.classList.add('open'); var b = $('[data-collapse]', c); if (b) b.setAttribute('aria-expanded', 'true'); }); return; }
+    // Messagerie : chaque état (popup comprise) se joue dans la conversation ouverte
+    if ($('.chat-layout')) { openConv($('.li[data-conv].sel') || $('.li[data-conv]')); if (state === 'conversation') return; }
+    // Bloc repliable ouvert par son ancre (recherche.html#filtres, #modifier)
+    var cs = $$('.collapsible[data-state~="' + state + '"]'); if (cs.length) { cs.forEach(function (c) { setCollapse(c, true); }); return; }
     if (state === 'loader') { var l = $('#loader'); if (l) l.classList.add('show'); return; }
     if (state === 'signaler-profil') { var rb = $('#m-profil [data-open="signaler-compte"]'); reportTarget(rb && rb.getAttribute('data-person')); openModal('signaler-compte'); return; }
     if (applyView(state)) return;
@@ -270,6 +309,7 @@
     var t = e.target;
     var el;
 
+    if ((el = t.closest('[data-conv-back]'))) { e.preventDefault(); closeConv(); return; }
     if ((el = t.closest('.demobar [data-role]'))) { e.preventDefault(); switchRole(el.getAttribute('data-role')); return; }
     if ((el = t.closest('[data-set-role]'))) setRole(el.getAttribute('data-set-role')); // puis navigation normale du lien
     if ((el = t.closest('[data-open]'))) {
@@ -294,7 +334,11 @@
       } else go();
       return;
     }
-    if ((el = t.closest('[data-loadtoast]'))) { e.preventDefault(); var msg = el.getAttribute('data-loadtoast'); loader(800, function () { toast(msg); }); return; }
+    if ((el = t.closest('[data-loadtoast]'))) {
+      e.preventDefault(); var msg = el.getAttribute('data-loadtoast'), fold = el.closest('.collapsible.open');
+      // Recherche (mobile) : le formulaire se replie pour laisser voir les résultats
+      loader(800, function () { if (fold) setCollapse(fold, false); toast(msg); }); return;
+    }
     if ((el = t.closest('[data-tab]'))) { e.preventDefault(); activateTab(el.getAttribute('data-tab')); return; }
     if ((el = t.closest('[data-toast]'))) { e.preventDefault(); toast(el.getAttribute('data-toast')); if (el.hasAttribute('data-remove')) { var c = el.closest(el.getAttribute('data-remove')); if (c) { c.style.transition = 'opacity .2s'; c.style.opacity = '0'; setTimeout(function () { c.remove(); }, 200); } } return; }
     if ((el = t.closest('[data-scroll]'))) { var tg = document.getElementById(el.getAttribute('data-scroll')); if (tg) { tg.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' }); tg.setAttribute('tabindex', '-1'); tg.focus({ preventScroll: true }); } return; }
@@ -329,11 +373,7 @@
       }
       return;
     }
-    if ((el = t.closest('[data-collapse]'))) {
-      var cb = el.closest('.collapsible'), op = cb.classList.toggle('open');
-      el.setAttribute('aria-expanded', op); el.setAttribute('aria-label', op ? 'Masquer les filtres' : 'Afficher les filtres');
-      return;
-    }
+    if ((el = t.closest('[data-collapse]'))) { var cb = el.closest('.collapsible'); setCollapse(cb, !cb.classList.contains('open')); return; }
     if ((el = t.closest('.pager [data-page]'))) { setPage(el); return; }
     if ((el = t.closest('.toggle'))) { el.classList.toggle('on'); el.setAttribute('aria-pressed', el.classList.contains('on')); return; }
     if ((el = t.closest('.days button'))) { if (!el.classList.contains('off')) el.classList.toggle('on'); return; }
@@ -351,7 +391,7 @@
     }
     if ((el = t.closest('.select > button'))) { var sel = el.parentNode, was = sel.classList.contains('open'); $$('.select.open').forEach(function (x) { x.classList.remove('open'); }); if (!was) sel.classList.add('open'); return; }
     $$('.select.open').forEach(function (x) { if (!x.contains(t)) x.classList.remove('open'); });
-    if ((el = t.closest('.li[data-conv]'))) { $$('.li[data-conv]', el.closest('.list')).forEach(function (x) { x.classList.toggle('sel', x === el); }); return; }
+    if ((el = t.closest('.li[data-conv]'))) { openConv(el); return; }
     if ((el = t.closest('[data-logout]'))) { e.preventDefault(); navigate('connexion.html'); return; }
 
     // Navigation
